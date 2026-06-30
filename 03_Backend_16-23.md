@@ -2089,9 +2089,185 @@ const credential = await navigator.credentials.get({
 
 # 19. Databases
 
-Database choice and optimization are among the most heavily tested backend topics at the senior level — interviewers assume you can write queries, so they go deeper: *why* does this index help, what does `EXPLAIN ANALYZE` actually tell you, when does eventual consistency become a problem, and which paradigm fits this access pattern? The modern backend engineer routinely works across PostgreSQL (relational, ACID, the default for most transactional workloads), MongoDB (document, schema-on-read, natural for hierarchical data), Redis (in-memory data structures, the default for caching and rate-limiting), and sometimes DynamoDB (key-value/document, infinite scale, single-table design required). Each has a primary use case and a failure mode when used outside it. This section covers the tools, their internals, and the decisions that separate senior engineers from those who just pick whichever database they already know.
+Database choice and optimization are among the most heavily tested backend topics at the senior level — interviewers assume you can write queries, so they go deeper: *why* does this index help, what does `EXPLAIN ANALYZE` actually tell you, when does eventual consistency become a problem, and which paradigm fits this access pattern? This section is organized in three groups: **SQL** (fundamentals first, then PostgreSQL, MySQL, and ORMs), **NoSQL** (MongoDB, Redis, DynamoDB, Cassandra, Elasticsearch), and **cross-cutting patterns** (multi-tenancy and caching). The right choice always starts with access patterns — relational for transactional consistency and complex queries, document for hierarchical data and schema flexibility, key-value for sub-millisecond reads at scale.
 
-## 19.1 PostgreSQL
+### SQL
+
+## 19.1 SQL Fundamentals
+
+SQL (Structured Query Language) is the universal language for relational databases. A solid grasp of joins, aggregations, transactions, and query planning is expected of any senior engineer, regardless of specialisation.
+
+### JOINs
+
+```sql
+-- Sample tables
+-- users: id, name, email
+-- orders: id, user_id, total, status
+-- order_items: id, order_id, product_id, quantity
+
+-- INNER JOIN: only rows with matches in BOTH tables
+SELECT u.name, o.total
+FROM users u
+INNER JOIN orders o ON u.id = o.user_id;
+-- ← users with NO orders are excluded
+
+-- LEFT JOIN: ALL rows from left table + matching rows from right
+SELECT u.name, COUNT(o.id) as order_count
+FROM users u
+LEFT JOIN orders o ON u.id = o.user_id
+GROUP BY u.id, u.name;
+-- ← users with no orders appear with order_count = 0
+
+-- RIGHT JOIN: ALL rows from right table + matching rows from left
+-- (less common — can usually be rewritten as a LEFT JOIN)
+
+-- FULL OUTER JOIN: ALL rows from BOTH tables
+SELECT u.name, o.id as order_id
+FROM users u
+FULL OUTER JOIN orders o ON u.id = o.user_id;
+-- ← includes users with no orders AND orders with no matching user
+
+-- Self-join: join a table to itself
+SELECT e.name as employee, m.name as manager
+FROM employees e
+LEFT JOIN employees m ON e.manager_id = m.id;
+-- ← employees without managers (CEO) appear with manager = NULL
+```
+
+### ACID Properties
+
+ACID guarantees make relational databases reliable for financial and mission-critical data:
+
+| Property    | Meaning                                                                 |
+|-------------|-------------------------------------------------------------------------|
+| **A**tomicity | A transaction is all-or-nothing. If any step fails, all are rolled back. |
+| **C**onsistency | A transaction moves the database from one valid state to another. Constraints and rules are enforced. |
+| **I**solation | Concurrent transactions behave as if they ran sequentially. One transaction can't see another's intermediate state. |
+| **D**urability | Once committed, data survives crashes. Written to disk/WAL before acknowledging success. |
+
+```sql
+-- Classic bank transfer: ACID in practice
+BEGIN;
+
+UPDATE accounts SET balance = balance - 100 WHERE id = 1;
+-- If this succeeds but the next fails, ROLLBACK undoes both
+
+UPDATE accounts SET balance = balance + 100 WHERE id = 2;
+
+COMMIT;  -- Both updates are atomically committed
+-- OR: ROLLBACK;  -- Neither update persists
+```
+
+### Transaction Isolation Levels
+
+Isolation prevents concurrent transactions from interfering. Higher isolation = fewer anomalies but lower throughput:
+
+| Problem              | Description                                                         |
+|----------------------|---------------------------------------------------------------------|
+| **Dirty read**       | Transaction reads uncommitted changes from another transaction      |
+| **Non-repeatable read** | Same row read twice in a transaction returns different values    |
+| **Phantom read**     | A range query returns different rows when repeated (new rows added) |
+
+PostgreSQL's default (`READ COMMITTED`) prevents dirty reads. Most financial systems use `SERIALIZABLE` for correctness.
+
+## 19.2 MySQL
+
+MySQL is the most widely deployed open-source relational database — the M in the LAMP/LEMP stack, and still the default at many organisations running legacy Node.js or PHP backends. InnoDB, MySQL's default storage engine since version 5.5, is fully ACID-compliant with row-level locking. For greenfield projects PostgreSQL is usually the better default (richer feature set, more correct SQL behaviour out of the box), but MySQL is pervasive in existing systems and runs at massive scale (Meta, Twitter, Airbnb all ran MySQL).
+
+### Storage engines
+
+| Engine | ACID | Row locking | When to use |
+|---|---|---|---|
+| **InnoDB** | Yes | Yes | All production workloads — the only real option |
+| MyISAM | No | Table-level | Legacy; read-heavy with no transaction requirements |
+| MEMORY | No | Table-level | Temporary, session-scoped data only |
+
+**InnoDB internals — the clustered index:** Unlike PostgreSQL (heap storage + separate indexes), InnoDB stores rows inside the primary-key B-tree. This means a PK lookup is one B-tree traversal that returns the full row; a secondary index lookup requires two traversals (secondary → PK → data). Consequence: choose an auto-increment integer PK to keep inserts sequential and avoid page fragmentation.
+
+### Replication
+
+MySQL streams changes via the **binary log (binlog)** from a primary to one or more replicas:
+
+```sql
+-- my.cnf on primary
+server-id             = 1
+log_bin               = mysql-bin
+binlog_format         = ROW   -- row-based: deterministic, recommended over statement-based
+gtid_mode             = ON    -- Global Transaction IDs: simpler failover, no log offsets
+enforce_gtid_consistency = ON
+
+-- On each replica after connecting it to the primary:
+START REPLICA;
+SHOW REPLICA STATUS\G   -- check Seconds_Behind_Source and any replication errors
+```
+
+**Statement vs row-based binlog:**
+- **Statement-based:** logs the SQL — compact, but non-deterministic functions (`NOW()`, `UUID()`) can produce different values on replicas.
+- **Row-based:** logs actual before/after row values — verbose but always deterministic. Use in production.
+
+Common pattern: one primary for writes, one or more read replicas behind a load balancer for read-heavy queries.
+
+### Key syntax differences from PostgreSQL
+
+```sql
+-- AUTO_INCREMENT instead of SERIAL / IDENTITY
+CREATE TABLE users (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  email      VARCHAR(255) NOT NULL UNIQUE,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Backtick identifier quoting (PostgreSQL uses double-quotes)
+SELECT `name`, `email` FROM `users`;
+
+-- ENUM as a column type (PostgreSQL requires a separate CREATE TYPE)
+ALTER TABLE orders
+  ADD COLUMN status ENUM('pending', 'processing', 'shipped', 'cancelled')
+  NOT NULL DEFAULT 'pending';
+
+-- JSON column (MySQL 8.0+) — functional but less capable than PG's JSONB
+CREATE TABLE products (metadata JSON);
+SELECT JSON_EXTRACT(metadata, '$.color') FROM products;
+-- shorthand:  SELECT metadata->>'$.color' FROM products;
+
+-- No partial indexes — use a generated column + regular index instead
+ALTER TABLE users
+  ADD COLUMN active_email VARCHAR(255) GENERATED ALWAYS AS (IF(active, email, NULL)) STORED;
+CREATE INDEX idx_active_email ON users(active_email);
+```
+
+### EXPLAIN in MySQL
+
+```sql
+EXPLAIN SELECT * FROM orders WHERE user_id = 123 AND status = 'pending';
+
+-- Key output columns:
+-- type      ALL (full scan) → index → range → ref → eq_ref → const  (worst → best)
+-- key       which index MySQL chose (NULL = no index used)
+-- rows      estimated rows examined
+-- filtered  % of rows that pass the WHERE after index filtering
+-- Extra     "Using index" (covering — good), "Using filesort" (expensive), "Using temporary"
+```
+
+### MySQL vs PostgreSQL
+
+| Feature | MySQL | PostgreSQL |
+|---|---|---|
+| **JSONB** | JSON text column, limited indexing | Binary, indexable, rich operators |
+| **Full-text search** | `FULLTEXT` index | `tsvector` / `tsquery` |
+| **Transactions** | ACID, MVCC (InnoDB) | ACID, MVCC |
+| **Default isolation** | REPEATABLE READ | READ COMMITTED |
+| **Window functions** | Full support (8.0+) | Full support |
+| **Recursive CTEs** | Yes (8.0+) | Yes |
+| **Partial indexes** | No (generated column workaround) | Yes |
+| **Extensions** | Limited | Many (PostGIS, pgvector, pg_stat_statements) |
+| **Clustered index** | PK is the clustered index | Heap + separate indexes |
+| **Replication** | Binlog, GTID, semi-sync | Logical/physical streaming |
+| **Best for** | MySQL-invested teams, AWS Aurora | Complex queries, JSONB, GIS, extensions |
+
+**Choosing:** PostgreSQL for greenfield. MySQL when inheriting an existing stack, your team has deep MySQL expertise, or you're using AWS Aurora (MySQL-compatible managed service).
+
+## 19.3 PostgreSQL
 
 PostgreSQL is the most feature-rich open-source relational database and the default for most modern application backends. Its ACID guarantees are strict by default, its index types are varied (B-tree for general equality/range, GIN for JSON and array containment, GiST for geometric and full-text data, partial indexes for filtered subsets), and its support for window functions, CTEs, lateral joins, and full-text search covers a wide range of analytical and application queries. Senior interviews probe `EXPLAIN ANALYZE` because understanding query plans — why a sequential scan is happening instead of an index scan, what the row estimates and actual costs mean, where a Sort or Hash is expensive — is how you diagnose and fix slow queries in production rather than guessing at indexes.
 
@@ -2266,22 +2442,75 @@ COMMIT;
 | **REPEATABLE READ**             | ❌         | ❌                  | ✅ (PG prevents) |
 | **SERIALIZABLE**                | ❌         | ❌                  | ❌               |
 
-## 19.2 MySQL vs PostgreSQL
+## 19.4 ORMs
 
-MySQL and PostgreSQL are both mature, battle-tested relational databases, but they have different defaults and feature profiles. PostgreSQL has historically had stricter standards compliance, a richer feature set (window functions, CTEs, JSONB, advanced index types, array columns), and more correct default behavior — MySQL historically allowed silent data truncation and division by zero with default settings. MySQL remains widely deployed, particularly in older stacks and high-traffic read-heavy workloads where its read replica story and simpler replication were historically more mature. In practice, for a greenfield project, PostgreSQL is the default choice; you'll encounter MySQL when inheriting legacy systems.
+Object-Relational Mappers abstract SQL behind a type-safe API. Prisma generates a typed client from your schema; Drizzle stays close to SQL with a query-builder feel. The right choice depends on team preference — Prisma wins on DX and ecosystem, Drizzle wins on bundle size and flexibility.
 
-| Feature               | PostgreSQL                         | MySQL                     |
-| --------------------- | ---------------------------------- | ------------------------- |
-| **JSONB**             | Excellent (binary, indexable)      | JSON (text-based, slower) |
-| **Full-text search**  | Built-in (tsvector)                | Built-in (FULLTEXT)       |
-| **Transactions**      | ACID, MVCC                         | ACID (InnoDB)             |
-| **Default isolation** | READ COMMITTED                     | REPEATABLE READ           |
-| **Window functions**  | Full support                       | Full support (8.0+)       |
-| **CTEs**              | Recursive                          | Recursive (8.0+)          |
-| **Extensions**        | Many (PostGIS, pg_stat_statements) | Limited                   |
-| **Best for**          | Complex queries, JSONB, GIS        | Simple CRUD, read-heavy   |
+### Prisma
 
-## 19.3 MongoDB
+```typescript
+// schema.prisma
+model User {
+  id    Int     @id @default(autoincrement())
+  email String  @unique
+  name  String?
+  posts Post[]
+}
+
+model Post {
+  id        Int      @id @default(autoincrement())
+  title     String
+  content   String?
+  author    User     @relation(fields: [authorId], references: [id])
+  authorId  Int
+  createdAt DateTime @default(now())
+}
+
+// Generated client
+import { PrismaClient } from '@prisma/client';
+const prisma = new PrismaClient();
+
+// Queries
+const users = await prisma.user.findMany({
+  include: { posts: true },
+});
+
+const user = await prisma.user.create({
+  data: {
+    email: 'alice@example.com',
+    name: 'Alice',
+    posts: {
+      create: { title: 'Hello World' },
+    },
+  },
+});
+```
+
+### Drizzle (Lightweight, SQL-like)
+
+```typescript
+import { drizzle } from "drizzle-orm/node-postgres";
+import { pgTable, serial, text } from "drizzle-orm/pg-core";
+import { eq } from "drizzle-orm";
+
+const users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  name: text("name"),
+  email: text("email").unique(),
+});
+
+const db = drizzle(pool);
+
+// Queries (SQL-like)
+const allUsers = await db.select().from(users);
+const user = await db.select().from(users).where(eq(users.id, 1));
+
+await db.insert(users).values({ name: "Alice", email: "alice@example.com" });
+```
+
+### NoSQL
+
+## 19.5 MongoDB
 
 MongoDB stores data as BSON documents in schema-optional collections. The document model is natural when your data is hierarchical — rather than joining across tables, you embed related data in a single document and retrieve it in one read. The central design question is **embed vs reference**: embed when the data is always read together and has a bounded size (a post with its comments, up to a few dozen); reference when the sub-document grows unbounded or is accessed independently. Interviewers probe the aggregation pipeline — MongoDB's equivalent of SQL GROUP BY + JOIN + filtering in a sequence of stages — because it's both powerful and easy to write inefficiently without understanding indexes.
 
@@ -2356,7 +2585,7 @@ db.orders.aggregate([
 ]);
 ```
 
-## 19.4 Redis
+## 19.6 Redis
 
 Redis is an in-memory data structure server — most commonly used as a cache, but also as a message broker (pub/sub, streams), session store, rate-limiter, and distributed lock. Its speed comes from keeping all data in RAM with optional persistence (RDB snapshots for point-in-time recovery, AOF for operation logging). The central operational question is **eviction policy**: when memory is full, Redis can evict keys by LRU, LFU, or TTL — misunderstanding this is a common production pitfall. Interviewers often ask candidates to sketch a rate-limiter using a sorted set, or to explain why Redis pub/sub is fire-and-forget while Redis Streams give durable, consumer-group replay.
 
@@ -2457,71 +2686,7 @@ async function updateUser(id: number, data: any) {
 
 **Recommended for cache:** `allkeys-lru`
 
-## 19.5 ORMs
-
-### Prisma
-
-```typescript
-// schema.prisma
-model User {
-  id    Int     @id @default(autoincrement())
-  email String  @unique
-  name  String?
-  posts Post[]
-}
-
-model Post {
-  id        Int      @id @default(autoincrement())
-  title     String
-  content   String?
-  author    User     @relation(fields: [authorId], references: [id])
-  authorId  Int
-  createdAt DateTime @default(now())
-}
-
-// Generated client
-import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient();
-
-// Queries
-const users = await prisma.user.findMany({
-  include: { posts: true },
-});
-
-const user = await prisma.user.create({
-  data: {
-    email: 'alice@example.com',
-    name: 'Alice',
-    posts: {
-      create: { title: 'Hello World' },
-    },
-  },
-});
-```
-
-### Drizzle (Lightweight, SQL-like)
-
-```typescript
-import { drizzle } from "drizzle-orm/node-postgres";
-import { pgTable, serial, text } from "drizzle-orm/pg-core";
-import { eq } from "drizzle-orm";
-
-const users = pgTable("users", {
-  id: serial("id").primaryKey(),
-  name: text("name"),
-  email: text("email").unique(),
-});
-
-const db = drizzle(pool);
-
-// Queries (SQL-like)
-const allUsers = await db.select().from(users);
-const user = await db.select().from(users).where(eq(users.id, 1));
-
-await db.insert(users).values({ name: "Alice", email: "alice@example.com" });
-```
-
-## 19.6 DynamoDB and Single-Table Design
+## 19.7 DynamoDB and Single-Table Design
 
 DynamoDB is AWS's fully managed, serverless NoSQL database that delivers consistent single-digit millisecond performance at any scale. Unlike relational databases that you provision and manage, DynamoDB scales automatically and bills per read/write capacity unit (or on-demand). It is the default NoSQL choice for AWS-native architectures.
 
@@ -2589,7 +2754,7 @@ const items = Items?.map(unmarshall);
 - Strong vs eventually consistent reads (eventually consistent is 2x cheaper)
 - DynamoDB Streams: change data capture stream that can trigger Lambda
 
-## 19.7 Cassandra / Astra DB
+## 19.8 Cassandra / Astra DB
 
 Apache Cassandra is a distributed, wide-column NoSQL database designed for massive write throughput with no single point of failure. Originally developed at Facebook, it's widely used for time-series data, IoT, and globally distributed workloads. **Astra DB** is DataStax's managed Cassandra service — Cassandra-compatible with a REST/GraphQL API layer.
 
@@ -2635,7 +2800,7 @@ LIMIT 50;
 - `QUORUM` — majority of replicas (recommended balance of speed + consistency)
 - `ALL` — all replicas must respond (strongest, slowest)
 
-## 19.8 Elasticsearch and SOLR
+## 19.9 Elasticsearch and SOLR
 
 Elasticsearch is a distributed search and analytics engine built on Apache Lucene. It's used for full-text search, log analytics (ELK/Elastic Stack), product search, and auto-complete. **SOLR** is an older Apache project with similar capabilities but less momentum in modern stacks.
 
@@ -2699,130 +2864,7 @@ console.log(hits.hits.map(h => h._source));
 - Use Elasticsearch as a read-optimized search layer (kept in sync via CDC or events)
 - Elasticsearch is eventually consistent and not suitable for financial transactions
 
-## 19.9 SQL Fundamentals
-
-SQL (Structured Query Language) is the universal language for relational databases. A solid grasp of joins, aggregations, transactions, and query planning is expected of any senior engineer, regardless of specialisation.
-
-### JOINs
-
-```sql
--- Sample tables
--- users: id, name, email
--- orders: id, user_id, total, status
--- order_items: id, order_id, product_id, quantity
-
--- INNER JOIN: only rows with matches in BOTH tables
-SELECT u.name, o.total
-FROM users u
-INNER JOIN orders o ON u.id = o.user_id;
--- ← users with NO orders are excluded
-
--- LEFT JOIN: ALL rows from left table + matching rows from right
-SELECT u.name, COUNT(o.id) as order_count
-FROM users u
-LEFT JOIN orders o ON u.id = o.user_id
-GROUP BY u.id, u.name;
--- ← users with no orders appear with order_count = 0
-
--- RIGHT JOIN: ALL rows from right table + matching rows from left
--- (less common — can usually be rewritten as a LEFT JOIN)
-
--- FULL OUTER JOIN: ALL rows from BOTH tables
-SELECT u.name, o.id as order_id
-FROM users u
-FULL OUTER JOIN orders o ON u.id = o.user_id;
--- ← includes users with no orders AND orders with no matching user
-
--- Self-join: join a table to itself
-SELECT e.name as employee, m.name as manager
-FROM employees e
-LEFT JOIN employees m ON e.manager_id = m.id;
--- ← employees without managers (CEO) appear with manager = NULL
-```
-
-### ACID Properties
-
-ACID guarantees make relational databases reliable for financial and mission-critical data:
-
-| Property    | Meaning                                                                 |
-|-------------|-------------------------------------------------------------------------|
-| **A**tomicity | A transaction is all-or-nothing. If any step fails, all are rolled back. |
-| **C**onsistency | A transaction moves the database from one valid state to another. Constraints and rules are enforced. |
-| **I**solation | Concurrent transactions behave as if they ran sequentially. One transaction can't see another's intermediate state. |
-| **D**urability | Once committed, data survives crashes. Written to disk/WAL before acknowledging success. |
-
-```sql
--- Classic bank transfer: ACID in practice
-BEGIN;
-
-UPDATE accounts SET balance = balance - 100 WHERE id = 1;
--- If this succeeds but the next fails, ROLLBACK undoes both
-
-UPDATE accounts SET balance = balance + 100 WHERE id = 2;
-
-COMMIT;  -- Both updates are atomically committed
--- OR: ROLLBACK;  -- Neither update persists
-```
-
-### Transaction Isolation Levels
-
-Isolation prevents concurrent transactions from interfering. Higher isolation = fewer anomalies but lower throughput:
-
-| Problem              | Description                                                         |
-|----------------------|---------------------------------------------------------------------|
-| **Dirty read**       | Transaction reads uncommitted changes from another transaction      |
-| **Non-repeatable read** | Same row read twice in a transaction returns different values    |
-| **Phantom read**     | A range query returns different rows when repeated (new rows added) |
-
-PostgreSQL's default (`READ COMMITTED`) prevents dirty reads. Most financial systems use `SERIALIZABLE` for correctness.
-
-## Database Priority Summary
-
-| Topic                                                       | Priority                     |
-| ----------------------------------------------------------- | ---------------------------- |
-| **PostgreSQL**                                              |                              |
-| Indexes (B-tree, partial, covering, GIN, BRIN)              | **Critical**                 |
-| EXPLAIN ANALYZE                                             | **Deep**                     |
-| Window functions                                            | **Deep**                     |
-| CTEs (recursive)                                            | **Deep**                     |
-| Transactions, isolation levels                              | **Deep**                     |
-| JSONB                                                       | **Important**                |
-| **MongoDB**                                                 |                              |
-| Embed vs Reference                                          | **Important**                |
-| Aggregation pipeline                                        | **Important**                |
-| **Redis**                                                   |                              |
-| Data structures (Strings, Lists, Sets, Sorted Sets, Hashes) | **Critical**                 |
-| Caching patterns (cache-aside, write-through)               | **Critical**                 |
-| Eviction policies                                           | **Deep**                     |
-| **DynamoDB**                                                |                              |
-| Partition key, sort key, GSI                                | **Deep**                     |
-| Single-table design                                         | **Important**                |
-| DynamoDB Streams, DAX                                       | **Know**                     |
-| **Cassandra / Astra DB**                                    |                              |
-| Partition key + clustering key design                       | **Learn**                    |
-| Consistency levels (ONE/QUORUM/ALL)                         | **Learn**                    |
-| **Elasticsearch**                                           |                              |
-| Inverted index, analyzers, relevance scoring                | **Learn**                    |
-| ELK Stack / OpenSearch                                      | **Learn**                    |
-| **SQL Fundamentals**                                        |                              |
-| JOINs (INNER, LEFT, RIGHT, FULL, self)                      | **Critical**                 |
-| ACID properties                                             | **Critical**                 |
-| Isolation levels                                            | **Deep**                     |
-| **ORMs**                                                    |                              |
-| Prisma                                                      | **Important** (most popular) |
-| Drizzle                                                     | **Learn** (fast growing)     |
-| **Multi-Tenancy**                                           |                              |
-| Three isolation models (RLS, schema, DB)                    | **Deep**                     |
-| PostgreSQL RLS implementation                               | **Important**                |
-| Tenant context via AsyncLocalStorage                        | **Important**                |
-| **Caching Strategies**                                      |                              |
-| Full cache stack (browser → CDN → Redis → DB)               | **Deep**                     |
-| HTTP caching headers (Cache-Control, ETag, SWR)             | **Important**                |
-| CDN surrogate keys / cache purge                            | **Important**                |
-| Cache stampede prevention (mutex lock)                      | **Learn**                    |
-| Cache invalidation patterns                                 | **Deep**                     |
-
----
+### Patterns
 
 ## 19.10 Multi-Tenancy Patterns
 
@@ -2974,7 +3016,7 @@ await fastly.purgeByTag(`user-${userId}`);
 
 ### Layer 3: Application cache (Redis)
 
-See §19.4 for Redis data structures. The caching patterns in context:
+See §19.6 for Redis data structures. The caching patterns in context:
 
 | Pattern | Description | When to use |
 | --- | --- | --- |
@@ -3040,6 +3082,56 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY monthly_revenue;
 **The fundamental trade-off:** freshness vs performance. The more aggressively you cache, the more you risk serving stale data. The right TTL always depends on the data's tolerance for staleness: session tokens — no caching; user profile — 60 s fine; static product copy — hours or days fine.
 
 **Interview framing:** "How would you design caching for a read-heavy e-commerce product page?" — Walk the stack: immutable CDN caching for static assets (1 year + hash-busted on deploy), short TTL with `stale-while-revalidate` at the edge for product API responses (60 s SWR), Redis cache-aside for DB query results (5–15 min TTL), event-driven invalidation on product update (publish `product.updated` → subscriber clears Redis key + CDN surrogate purge). The follow-up: "What happens when the price changes?" — that's the invalidation question, answered by event-driven cache clearing.
+
+## Database Priority Summary
+
+| Topic                                                       | Priority                     |
+| ----------------------------------------------------------- | ---------------------------- |
+| **SQL Fundamentals**                                        |                              |
+| JOINs (INNER, LEFT, RIGHT, FULL, self)                      | **Critical**                 |
+| ACID properties                                             | **Critical**                 |
+| Transaction isolation levels                                | **Deep**                     |
+| **PostgreSQL**                                              |                              |
+| Indexes (B-tree, partial, covering, GIN, BRIN)              | **Critical**                 |
+| EXPLAIN ANALYZE                                             | **Deep**                     |
+| Window functions                                            | **Deep**                     |
+| CTEs (recursive)                                            | **Deep**                     |
+| Transactions, isolation levels                              | **Deep**                     |
+| JSONB                                                       | **Important**                |
+| **MySQL**                                                   |                              |
+| InnoDB storage engine, clustered index                      | **Important**                |
+| Replication (binlog, GTID, row-based)                       | **Important**                |
+| PostgreSQL vs MySQL tradeoffs                               | **Learn**                    |
+| **ORMs**                                                    |                              |
+| Prisma                                                      | **Important** (most popular) |
+| Drizzle                                                     | **Learn** (fast growing)     |
+| **MongoDB**                                                 |                              |
+| Embed vs Reference                                          | **Important**                |
+| Aggregation pipeline                                        | **Important**                |
+| **Redis**                                                   |                              |
+| Data structures (Strings, Lists, Sets, Sorted Sets, Hashes) | **Critical**                 |
+| Caching patterns (cache-aside, write-through)               | **Critical**                 |
+| Eviction policies                                           | **Deep**                     |
+| **DynamoDB**                                                |                              |
+| Partition key, sort key, GSI                                | **Deep**                     |
+| Single-table design                                         | **Important**                |
+| DynamoDB Streams, DAX                                       | **Know**                     |
+| **Cassandra / Astra DB**                                    |                              |
+| Partition key + clustering key design                       | **Learn**                    |
+| Consistency levels (ONE/QUORUM/ALL)                         | **Learn**                    |
+| **Elasticsearch**                                           |                              |
+| Inverted index, analyzers, relevance scoring                | **Learn**                    |
+| ELK Stack / OpenSearch                                      | **Learn**                    |
+| **Multi-Tenancy**                                           |                              |
+| Three isolation models (RLS, schema, DB)                    | **Deep**                     |
+| PostgreSQL RLS implementation                               | **Important**                |
+| Tenant context via AsyncLocalStorage                        | **Important**                |
+| **Caching Strategies**                                      |                              |
+| Full cache stack (browser → CDN → Redis → DB)               | **Deep**                     |
+| HTTP caching headers (Cache-Control, ETag, SWR)             | **Important**                |
+| CDN surrogate keys / cache purge                            | **Important**                |
+| Cache stampede prevention (mutex lock)                      | **Learn**                    |
+| Cache invalidation patterns                                 | **Deep**                     |
 
 ---
 
