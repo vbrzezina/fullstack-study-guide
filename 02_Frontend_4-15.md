@@ -516,9 +516,9 @@ Choosing the right rendering strategy is one of the most important architectural
 ---
 
 
-# 9. Routing & Data Fetching
+# 9. Routing, Data Fetching & Server State
 
-This section covers how users move between views and how data arrives. Two worlds exist: **client-side routing** in a single-page app (React Router) where navigation never hits the server, and **file-based / server routing** (Next.js App Router) where navigation can re-run server code. Data fetching follows the same split — client libraries (TanStack Query, SWR) vs Server Components.
+This section covers how users move between views and how data arrives. Three data-fetching approaches coexist in modern React: **client-side fetching** with SWR or TanStack Query in SPAs, **loader-based fetching** in React Router v7 / Remix, and **async Server Components** in Next.js App Router which fetch directly on the server with no client library. Knowing when each applies — and which client libraries still earn their place when RSC is available — is a senior-level distinction.
 
 ## Client-Side Routing (React Router / Remix)
 
@@ -595,64 +595,169 @@ export default function RootLayout({ children }) {
 }
 ```
 
-## TanStack Query / SWR / RTK Query: Still Valid?
+## SWR
 
-**Yes, but role changed.** Server Components handle static display data directly via `async/await`. Client data-fetching libraries handle the things Server Components can't:
+SWR (stale-while-revalidate) is Vercel's lightweight data-fetching hook. The name is the caching strategy: serve stale data immediately, revalidate in the background, update when fresh data arrives.
 
-- Polling / refetch intervals
-- Infinite scroll / client pagination
-- Complex optimistic updates
-- Offline support
-- Window focus refetching
+```typescript
+import useSWR from 'swr';
+import useSWRMutation from 'swr/mutation';
 
-**Hybrid pattern:** Server prefetches initial data via `queryClient.prefetchQuery()` → wraps in `<HydrationBoundary>` → Client component picks up the cached data with `useQuery()` and adds interactivity.
+const fetcher = (url: string) => fetch(url).then(r => r.json());
+
+function UserProfile({ id }: { id: string }) {
+  const { data, error, isLoading, mutate } = useSWR(`/api/users/${id}`, fetcher, {
+    revalidateOnFocus: true,
+    dedupingInterval:  2000,
+  });
+
+  const { trigger } = useSWRMutation(
+    `/api/users/${id}`,
+    async (url, { arg }: { arg: Partial<User> }) => {
+      await fetch(url, { method: 'PATCH', body: JSON.stringify(arg) });
+      mutate();
+    }
+  );
+
+  if (isLoading) return <Spinner />;
+  if (error)     return <ErrorView />;
+  return <div onClick={() => trigger({ name: 'Alice' })}>{data.name}</div>;
+}
+```
+
+**SWR vs TanStack Query:**
+
+| | SWR | TanStack Query |
+|---|---|---|
+| Bundle | ~4 KB | ~13 KB |
+| Mutations | Basic (`useSWRMutation`) | Full (optimistic, rollback) |
+| Infinite queries | Basic | First-class |
+| DevTools | None | Yes |
+| Offline support | No | Yes |
+
+SWR wins on simplicity and bundle size. TanStack Query wins on feature breadth. **In RSC apps**, both become less compelling for reads — see Data Fetching & Caching Patterns below.
+
+## TanStack Query
+
+TanStack Query manages the full lifecycle of server data: fetching, caching, background refetching, and synchronisation. Every piece of server data has a `queryKey` — TanStack Query owns the cache for that key.
+
+```typescript
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+
+function Users() {
+  const queryClient = useQueryClient();
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['users'],
+    queryFn:  () => fetch('/api/users').then(r => r.json()),
+    staleTime: 5000,
+    gcTime:    10 * 60 * 1000,
+  });
+
+  const mutation = useMutation({
+    mutationFn: (newUser: User) =>
+      fetch('/api/users', { method: 'POST', body: JSON.stringify(newUser) }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
+  });
+
+  if (isLoading) return <Spinner />;
+  if (error)     return <Error message={error.message} />;
+  return (
+    <div>
+      {data.map(u => <div key={u.id}>{u.name}</div>)}
+      <button onClick={() => mutation.mutate({ name: 'Alice' })}>Add</button>
+    </div>
+  );
+}
+```
+
+**Key features:** Caching, request deduplication, background refetch on window focus, polling, optimistic updates with automatic rollback, infinite queries, pagination.
 
 ## Data Fetching & Caching Patterns
 
 Beyond *where* you fetch, senior interviews probe *how* you fetch efficiently. The recurring villain is the **request waterfall** — sequential fetches that each wait for the previous one, multiplying latency.
 
 ```tsx
-// ❌ Waterfall: user must resolve before posts even starts (latency = A + B)
+// ❌ Waterfall: user must resolve before posts starts (latency = A + B)
 const user = await getUser(id);
 const posts = await getPosts(user.id);
 
-// ✅ Parallel: kick both off, then await (latency = max(A, B)) — when they're independent
+// ✅ Parallel: kick both off, then await (latency = max(A, B))
 const [user, settings] = await Promise.all([getUser(id), getSettings(id)]);
 ```
 
-In Server Components, fetches in *sibling* components run in parallel automatically, but an `await` in a parent blocks its children — so hoist independent fetches or use `Promise.all`. When a child genuinely depends on the parent's data, wrap the slow part in `<Suspense>` so the rest of the page streams immediately instead of blocking on it.
+In Server Components, fetches in *sibling* components run in parallel automatically, but an `await` in a parent blocks its children — hoist independent fetches or use `Promise.all`. When a child depends on the parent's data, wrap the slow part in `<Suspense>` so the rest of the page streams immediately.
 
-**Prefetching + hydration (TanStack Query).** Fetch on the server during render, dehydrate the cache, and let the client hydrate it — the user sees data instantly and the client cache takes over for refetching:
+**Prefetching + hydration (TanStack Query).** Fetch on the server, dehydrate the cache, let the client hydrate it — user sees data instantly, client cache takes over for refetching:
 
 ```tsx
 // Server Component
 const qc = new QueryClient();
-await qc.prefetchQuery({ queryKey: ["todos"], queryFn: getTodos });
+await qc.prefetchQuery({ queryKey: ['todos'], queryFn: getTodos });
 return <HydrationBoundary state={dehydrate(qc)}><Todos /></HydrationBoundary>;
-// <Todos/> (client) calls useQuery(["todos"]) → no loading flash, then live refetching
+// <Todos/> calls useQuery(['todos']) — no loading flash, then live refetching
 ```
 
-**Optimistic updates.** Update the UI immediately on a mutation, then roll back if the server rejects it — essential for snappy UX. TanStack Query does this via `onMutate`/`onError`/`onSettled`; React 19 exposes `useOptimistic` (see §5.3).
+**Optimistic updates.** Update the UI immediately on mutation, roll back if the server rejects — essential for snappy UX. TanStack Query does this via `onMutate`/`onError`/`onSettled`; React 19 exposes `useOptimistic` (see §5.3).
 
-**Cache invalidation.** The hard part of caching. TanStack Query keys cache entries by `queryKey`; after a mutation you `queryClient.invalidateQueries({ queryKey })` to mark them stale and trigger a refetch. In Next.js the equivalents are `revalidatePath()` / `revalidateTag()` (server) and the `next: { tags }` fetch option. **staleTime vs gcTime:** `staleTime` is how long data is considered fresh (no refetch); `gcTime` (formerly `cacheTime`) is how long unused data lingers in memory before garbage collection.
+**Cache invalidation.** TanStack Query keys cache entries by `queryKey`; after a mutation call `queryClient.invalidateQueries({ queryKey })`. In Next.js: `revalidatePath()` / `revalidateTag()` server-side and `next: { tags }` on the fetch option. **staleTime vs gcTime:** `staleTime` is how long data is considered fresh (no background refetch); `gcTime` is how long unused data stays in memory before garbage collection.
+
+### Server Components vs Client Fetching
+
+In a Next.js App Router project, data fetching should start on the server unless there's a specific reason not to:
+
+```tsx
+// Server Component — no loading state, no client JS, no library needed
+async function ProductList() {
+  const products = await db.products.findMany();
+  return products.map(p => <ProductCard key={p.id} product={p} />);
+}
+```
+
+Server Actions cover most mutations:
+
+```typescript
+'use server'
+async function addToCart(productId: string) {
+  await db.cart.upsert({ productId, userId: await getSession() });
+  revalidatePath('/cart');
+}
+```
+
+**Client fetching still earns its place for:**
+- Real-time polling, WebSocket / SSE state
+- Infinite scroll and client-side pagination
+- Complex optimistic UI with rollback (TanStack Query `useMutation`)
+- SPAs that can't use App Router (Vite, React Native)
+- Post-mount user-initiated refetches
+
+| App type | Recommended data strategy |
+|---|---|
+| Next.js App Router | Server Components for reads; Server Actions + `revalidatePath` for mutations; TanStack Query for realtime / complex optimistic UI |
+| SPA (Vite / CRA) | TanStack Query or SWR for all server state |
+| React Native | TanStack Query or SWR |
+
+**Interview framing:** "When would you use TanStack Query vs Server Components?" — Server Components for reads: no client bundle, no loading state, simpler code. TanStack Query when the client genuinely owns the data lifecycle: real-time polling, infinite scroll, or mutations with optimistic UI and automatic rollback.
 
 ### Data Fetching Priority Summary
 
-| Topic                                  | Priority      |
-| -------------------------------------- | ------------- |
-| Server vs client fetching boundary     | **Critical**  |
-| Avoiding request waterfalls            | **Important** |
+| Topic | Priority |
+|---|---|
+| Server vs client fetching boundary | **Critical** |
+| Avoiding request waterfalls | **Important** |
 | Parallel vs sequential (`Promise.all`) | **Important** |
-| Optimistic updates                     | **Important** |
-| Cache invalidation (keys/tags)         | **Important** |
-| Prefetch + HydrationBoundary           | **Learn**     |
+| TanStack Query `useQuery` / `useMutation` | **Deep** |
+| Cache invalidation (keys/tags, `revalidatePath`) | **Important** |
+| Optimistic updates | **Important** |
+| SWR basics | **Know** |
+| Prefetch + HydrationBoundary | **Learn** |
 
 ---
 
 
-# 10. State Management
+# 10. Client State Management
 
-State management in React separates into two distinct concerns: **server state** (data fetched from APIs — loading, caching, revalidation) and **client state** (UI state — open modals, selected tabs, wizard progress). Libraries like TanStack Query and SWR own server state in SPA architectures; Redux, Context, and MobX own client state. The important caveat for modern Next.js projects: React Server Components shift data fetching to the server, removing the need for client-side cache management for the initial render — which changes the value proposition of every library in this section. This section covers the full landscape and ends with an honest look at what still earns its place in an RSC world.
+State management is about **client state** — UI state that lives in the browser and has no canonical server representation: open drawers, selected tabs, multi-step wizard progress, authenticated user object after login. Server state (API data, caching, refetching) lives in §9 with TanStack Query and SWR. This section covers the spectrum from React's built-ins through the Flux/Redux family to MobX, with the shared goal of making UI state predictable and traceable across a component tree.
 
 ## 10.1 Built-in Solutions
 
@@ -868,149 +973,18 @@ const CartView = observer(() => (   // re-renders when any observed value change
 
 **When MobX makes sense:** Domain-rich applications with complex object graphs (e-commerce, CRM), teams comfortable with OOP patterns, existing MobX codebases. **Tradeoff:** Less predictable than Redux — mutations can happen anywhere; implicit reactivity is ergonomic until something re-renders unexpectedly.
 
-## 10.5 SWR
+## 10.5 Comparison Table
 
-SWR (stale-while-revalidate) is Vercel's lightweight data-fetching hook. The name is the caching strategy: serve stale data immediately, revalidate in the background, update when fresh data arrives.
-
-```typescript
-import useSWR from 'swr';
-import useSWRMutation from 'swr/mutation';
-
-const fetcher = (url: string) => fetch(url).then(r => r.json());
-
-function UserProfile({ id }: { id: string }) {
-  const { data, error, isLoading, mutate } = useSWR(`/api/users/${id}`, fetcher, {
-    revalidateOnFocus: true,
-    dedupingInterval:  2000,
-  });
-
-  const { trigger } = useSWRMutation(
-    `/api/users/${id}`,
-    async (url, { arg }: { arg: Partial<User> }) => {
-      await fetch(url, { method: 'PATCH', body: JSON.stringify(arg) });
-      mutate();
-    }
-  );
-
-  if (isLoading) return <Spinner />;
-  if (error)     return <ErrorView />;
-  return <div onClick={() => trigger({ name: 'Alice' })}>{data.name}</div>;
-}
-```
-
-**SWR vs TanStack Query:**
-
-| | SWR | TanStack Query |
+| Library | Use Case | Bundle |
 |---|---|---|
-| Bundle | ~4 KB | ~13 KB |
-| Mutations | Basic (`useSWRMutation`) | Full (optimistic, rollback) |
-| Infinite queries | Basic | First-class |
-| DevTools | None | Yes |
-| Offline support | No | Yes |
+| **Context + useReducer** | Global UI state, no deps | 0 |
+| **Redux / RTK** | Complex client state, middleware, large teams | 9 KB |
+| **RTK Query** | CRUD + cache within a Redux app | (in RTK) |
+| **MobX** | OOP domain models, reactive state | 16 KB |
 
-SWR wins on simplicity and bundle size. TanStack Query wins on feature breadth. Both become less relevant in RSC apps (see §10.7).
+For server state (SWR, TanStack Query) and RSC-era data fetching guidance, see §9.
 
-## 10.6 TanStack Query
-
-TanStack Query manages the full lifecycle of server data: fetching, caching, background refetching, and synchronisation. Every piece of server data has a `queryKey` — TanStack Query owns the cache for that key.
-
-```typescript
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-
-function Users() {
-  const queryClient = useQueryClient();
-
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['users'],
-    queryFn:  () => fetch('/api/users').then(r => r.json()),
-    staleTime: 5000,
-    gcTime:    10 * 60 * 1000,
-  });
-
-  const mutation = useMutation({
-    mutationFn: (newUser: User) =>
-      fetch('/api/users', { method: 'POST', body: JSON.stringify(newUser) }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
-  });
-
-  if (isLoading) return <Spinner />;
-  if (error)     return <Error message={error.message} />;
-  return (
-    <div>
-      {data.map(u => <div key={u.id}>{u.name}</div>)}
-      <button onClick={() => mutation.mutate({ name: 'Alice' })}>Add</button>
-    </div>
-  );
-}
-```
-
-**Key features:** Caching, request deduplication, background refetch on window focus, polling, optimistic updates with automatic rollback, infinite queries, pagination.
-
-## 10.7 State Management in the RSC Era
-
-React Server Components change the calculus for every library in this section, and it is worth being honest about which problems they no longer solve.
-
-### What RSC removes
-
-In a Next.js App Router app, **data fetching moves to the server**:
-
-```typescript
-// Server Component — fetch runs on the server, no client JS bundle needed
-async function UserList() {
-  const users = await fetch('/api/users', { next: { revalidate: 60 } }).then(r => r.json());
-  return users.map((u: User) => <div key={u.id}>{u.name}</div>);
-}
-```
-
-Server Actions replace client-side mutations:
-
-```typescript
-'use server'
-async function createUser(formData: FormData) {
-  await db.users.create({ name: formData.get('name') as string });
-  revalidatePath('/users');
-}
-
-// No useQuery or useMutation needed here
-<form action={createUser}><button>Add</button></form>
-```
-
-**What this eliminates client-side:** the entire `isLoading / data / error` trilogy for initial page data, client-side fetch caches, and most of what TanStack Query / SWR / RTK Query were solving for reads.
-
-### What still needs client-side state
-
-RSC eliminates *server state from the client* — it does not eliminate client state:
-
-- **UI state** — open drawers, selected tabs, dark mode — always client
-- **Optimistic UI** — `useOptimistic` for simple cases; TanStack Query's `useMutation` with rollback for complex cases where you need granular control
-- **Client-side filtering/sorting** — after the server delivers a list, filtering it locally
-- **Multi-step wizard state** — form data spanning multiple steps before submission
-- **Real-time** — WebSocket or SSE subscriptions, live cursors, collaborative editing
-- **Non-RSC apps** — SPAs built with Vite, React Native, apps that can't adopt App Router
-
-### Practical guidance
-
-| App type | Recommended approach |
-|---|---|
-| Next.js App Router | Server Components for fetches; Server Actions + `revalidatePath` for mutations; Context or Redux for global UI state only |
-| SPA (Vite/CRA) | TanStack Query or SWR for server state; Redux or MobX for complex client state |
-| Existing Redux codebase | Migrate to RTK; consider RTK Query for data fetching over raw `createAsyncThunk` |
-| Complex domain model | MobX |
-
-**Interview framing:** "When would you reach for TanStack Query vs Server Components?" — In an RSC app, Server Components handle reads and Server Actions handle mutations. TanStack Query earns its place when you need optimistic updates with rollback, real-time polling, or infinite scroll — cases where the client genuinely owns the data lifecycle rather than just displaying server-rendered HTML.
-
-## 10.8 Comparison Table
-
-| Library | Use Case | RSC-relevant? | Bundle |
-|---|---|---|---|
-| **Context + useReducer** | Global UI state, no deps | Yes — always relevant | 0 |
-| **Redux / RTK** | Complex client state, middleware, large teams | Yes — for client state | 9 KB |
-| **RTK Query** | CRUD + cache within a Redux app | Limited (RSC handles reads) | (in RTK) |
-| **MobX** | OOP domain models, reactive state | Yes — client state | 16 KB |
-| **SWR** | Lightweight API fetching (SPA) | No — RSC replaces for RSC apps | 4 KB |
-| **TanStack Query** | Rich server state (SPA/CSR), optimistic UI | Partially — mutations + realtime | 13 KB |
-
-## State Management Priority Summary
+## Client State Management Priority Summary
 
 | Topic | Priority | Notes |
 |---|---|---|
@@ -1020,9 +994,6 @@ RSC eliminates *server state from the client* — it does not eliminate client s
 | **Redux Toolkit (RTK)** | **Important** | Modern Redux; Immer, createSlice, async thunks |
 | **RTK Query** | **Learn** | Redux's built-in data fetching layer |
 | **MobX** | **Know** | Less common but present in enterprise |
-| **SWR** | **Know** | Lightweight fetching for SPAs |
-| **TanStack Query** | **Deep** | Best-in-class for SPA server state; mutations in RSC apps |
-| **RSC + Server Actions** | **Critical** | Replaces client-side data fetching in Next.js App Router |
 
 ---
 

@@ -32,16 +32,15 @@
 6. [Server Components and Suspense](./02_Frontend_4-15.md#6-server-components-and-suspense) — 8 min
 7. [Next.js Fundamentals & Evolution](./02_Frontend_4-15.md#7-nextjs-fundamentals--evolution) — 12 min
 8. [Rendering Methods Compared](./02_Frontend_4-15.md#8-rendering-methods-compared) — 8 min
-9. [Routing & Data Fetching](./02_Frontend_4-15.md#9-routing--data-fetching) — 15 min
-10. [State Management](./02_Frontend_4-15.md#10-state-management) — 30 min
+9. [Routing, Data Fetching & Server State](./02_Frontend_4-15.md#9-routing-data-fetching--server-state) — 25 min
+    - [SWR](./02_Frontend_4-15.md#swr)
+    - [TanStack Query](./02_Frontend_4-15.md#tanstack-query)
+    - [Data Fetching & Caching Patterns](./02_Frontend_4-15.md#data-fetching--caching-patterns)
+10. [Client State Management](./02_Frontend_4-15.md#10-client-state-management) — 20 min
     - [10.1 Built-in Solutions](./02_Frontend_4-15.md#101-built-in-solutions)
     - [10.2 Flux Architecture](./02_Frontend_4-15.md#102-flux-architecture)
     - [10.3 Redux & Redux Toolkit](./02_Frontend_4-15.md#103-redux--redux-toolkit)
     - [10.4 MobX](./02_Frontend_4-15.md#104-mobx)
-    - [10.5 SWR](./02_Frontend_4-15.md#105-swr)
-    - [10.6 TanStack Query](./02_Frontend_4-15.md#106-tanstack-query)
-    - [10.7 State Management in the RSC Era](./02_Frontend_4-15.md#107-state-management-in-the-rsc-era)
-    - [10.8 Comparison Table](./02_Frontend_4-15.md#108-comparison-table)
 11. [Styling: Modern CSS, Tailwind, CSS-in-JS](./02_Frontend_4-15.md#11-styling-modern-css-tailwind-css-in-js) — 15 min
     - [11.1 Modern CSS](./02_Frontend_4-15.md#111-modern-css)
     - [11.2 Tailwind CSS v4](./02_Frontend_4-15.md#112-tailwind-css-v4)
