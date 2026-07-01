@@ -13,6 +13,8 @@ Node's performance story begins and ends with the event loop. A single-threaded 
 
 ### Event Loop Deep Dive
 
+The event loop runs phases in a fixed order — each phase has its own callback queue. Understanding which callbacks land in which phase, and when microtasks (`Promise` callbacks, `queueMicrotask`) run relative to phases, is essential for reasoning about async ordering bugs.
+
 ```
    ┌───────────────────────────┐
 ┌─>│           timers          │  setTimeout, setInterval
@@ -306,6 +308,8 @@ Express is the minimal Node.js web framework — a thin layer over Node's `http`
 
 ### Middleware Chain
 
+The stack executes in registration order. Each function can modify `req`/`res`, call `next()` to continue, call `next(err)` to jump to error middleware, or end the response directly.
+
 ```typescript
 import express from "express";
 import helmet from "helmet";
@@ -500,6 +504,8 @@ describe("POST /users", () => {
 NestJS brings inversion of control to Node.js. It wraps Express (or Fastify) and adds a module system, a dependency injection container, and four lifecycle hooks that handle cross-cutting concerns before and after your route handlers run. The DI container means you declare dependencies as constructor parameters and the framework resolves and injects them — this makes unit testing clean because you can inject mocks without touching the actual module. Understanding the request lifecycle order is the core interview question: **Middleware → Guard → Interceptor (in) → Pipe → Controller → Interceptor (out) → Exception Filter**. Guards handle authorization (return true/false); Pipes transform or validate input; Interceptors can mutate the request *and* response; Filters catch exceptions and shape error responses.
 
 ### Architecture
+
+NestJS organises code into Modules, Controllers, and Providers. `@Module` wires them: `controllers` receive HTTP requests, `providers` are DI-injectable services, and `exports` make a provider available to importing modules.
 
 ```typescript
 // user.module.ts
@@ -1040,6 +1046,8 @@ REST (Representational State Transfer) is the architectural style that underpins
 
 ### Richardson Maturity Model
 
+The model grades API design in four levels. Most production APIs sit at L2 (resources + HTTP verbs); L3 HATEOAS is rare.
+
 | Level  | Description          | Example                                                        |
 | ------ | -------------------- | -------------------------------------------------------------- |
 | **L0** | HTTP as tunnel (RPC) | POST /api { method: "getUser", params: [1] }                   |
@@ -1050,6 +1058,8 @@ REST (Representational State Transfer) is the architectural style that underpins
 **Most APIs are L2.** L3 (HATEOAS) is rare in practice.
 
 ### HTTP Methods & Idempotency
+
+Idempotency means a request can be retried without side effects. GET, PUT, and DELETE are idempotent; POST is not — submitting it twice creates two resources.
 
 | Method  | Idempotent | Safe | Use                              |
 | ------- | ---------- | ---- | -------------------------------- |
@@ -1079,6 +1089,8 @@ Content-Type: application/json
 Server stores key → if duplicate request, returns same response (prevents double charges).
 
 ### Status Codes
+
+Status codes communicate outcome semantics. Interviewers probe the difference between 400/401/403/422 — choosing the wrong one misleads API consumers and breaks client error handling.
 
 | Code    | Meaning               | Use                                                 |
 | ------- | --------------------- | --------------------------------------------------- |
@@ -1211,6 +1223,8 @@ GraphQL is a query language and runtime that lets clients request exactly the fi
 
 ### Schema
 
+The schema is the contract between client and server. Every field is explicitly typed, nullability is declared with `!` (non-nullable), and the schema itself documents the available queries and mutations.
+
 ```graphql
 type User {
   id: ID!
@@ -1240,6 +1254,8 @@ type Mutation {
 
 ### Resolvers (Node.js)
 
+Each schema field maps to a resolver function. Resolvers are called lazily — the runtime only invokes them for fields the client's query actually selected.
+
 ```typescript
 const resolvers = {
   Query: {
@@ -1266,6 +1282,8 @@ const resolvers = {
 ```
 
 ### N+1 Problem (Solved with DataLoader)
+
+Without DataLoader, resolving N users and fetching each user's posts fires N+1 queries. DataLoader batches all `.load(id)` calls made during a single tick into one query, then caches results for the lifetime of the request.
 
 ```typescript
 import DataLoader from "dataloader";
@@ -1297,6 +1315,8 @@ const resolvers = {
 ```
 
 ### GraphQL vs REST
+
+The choice depends on flexibility requirements, caching needs, and the number of clients. GraphQL shines for mobile apps and complex data requirements; REST is simpler for public APIs.
 
 |                        | GraphQL                                | REST                                   |
 | ---------------------- | -------------------------------------- | -------------------------------------- |
@@ -1346,6 +1366,8 @@ gRPC is Google's open-source RPC framework built on Protocol Buffers and HTTP/2.
 
 ### Proto Definition
 
+The `.proto` file is the source of truth — it defines services, RPCs, and message types. Client and server stubs are code-generated from it in any supported language.
+
 ```protobuf
 syntax = "proto3";
 
@@ -1377,6 +1399,8 @@ message CreateUserRequest {
 
 ### gRPC vs REST
 
+gRPC's binary encoding and HTTP/2 multiplexing make it significantly faster than JSON/REST, but it requires a proxy for browser clients and is harder to inspect with standard HTTP tools.
+
 |                 | gRPC                              | REST                         |
 | --------------- | --------------------------------- | ---------------------------- |
 | Protocol        | Protobuf (binary)                 | JSON (text)                  |
@@ -1391,6 +1415,8 @@ message CreateUserRequest {
 tRPC is a TypeScript-first RPC framework for monorepos where the frontend and backend share a codebase. Rather than generating code from a schema file, it infers types directly from your router definitions at build time — the client gets full autocompletion and type safety with zero codegen. A procedure defined on the server is callable on the client as if it were a local function, with input/output types fully inferred. The trade-off is that both sides must be TypeScript, making tRPC unsuitable for public APIs or polyglot stacks where consumers are in other languages.
 
 ### tRPC Server
+
+Procedures are defined as queries (reads) or mutations (writes). The exported `AppRouter` type is all the client needs for full end-to-end type safety — no code generation step required.
 
 ```typescript
 import { initTRPC } from "@trpc/server";
@@ -1416,6 +1442,8 @@ export type AppRouter = typeof appRouter;
 ```
 
 ### tRPC Client (Next.js)
+
+The client imports only the router's *type* (not the implementation) and infers all procedure types at compile time. Calling a procedure feels like a local function call; the underlying HTTP request and batching are invisible.
 
 ```typescript
 import { createTRPCProxyClient, httpBatchLink } from "@trpc/client";
@@ -1515,6 +1543,8 @@ The **Backend for Frontend** pattern — coined by Sam Newman — places a dedic
 
 ### BFF vs API Gateway
 
+They are not alternatives — the canonical setup has both. The API Gateway handles the perimeter; the BFF handles client-specific aggregation behind it.
+
 | | API Gateway | BFF |
 | --- | --- | --- |
 | **Purpose** | Cross-cutting concerns (auth, rate limiting, routing, SSL termination) | Client-specific data aggregation & transformation |
@@ -1536,6 +1566,8 @@ Use a BFF when:
 Avoid a BFF when you have a single client, a monolith, or simple CRUD — the extra service adds latency and operational overhead with no benefit.
 
 ### Implementation (NestJS)
+
+The BFF service fires downstream calls in parallel with `Promise.all`, shapes a composite DTO from the results, and owns authentication at its own boundary.
 
 ```typescript
 // bff/src/product-page/product-page.service.ts
@@ -1614,6 +1646,8 @@ Many teams use Apollo Server or `NestJS GraphQLModule` as their BFF layer. The G
 Without a deliberate type-sharing strategy, frontend and backend types drift: a field renamed from `userName` to `user_name` on the server breaks the UI at runtime, not at compile time. Three strategies are in active use to eliminate this class of bug — each trades off ergonomics, tooling complexity, and polyrepo compatibility differently. Choosing the right one is an architectural decision senior engineers are regularly asked to explain.
 
 ### The problem: manual type maintenance
+
+Without a type-sharing strategy, frontend and backend types drift silently — a renamed field breaks the UI at runtime, not at compile time.
 
 ```typescript
 // Backend DTO — someone renames this field
@@ -1730,6 +1764,8 @@ This is the key advantage over OpenAPI: if you add a field to the query that doe
 
 ### Strategy comparison
 
+Choose tRPC for TypeScript monorepos, OpenAPI codegen for polyrepo REST APIs or public APIs, and GraphQL codegen for existing GraphQL systems.
+
 | | tRPC | OpenAPI codegen | GraphQL codegen |
 | --- | --- | --- | --- |
 | **Schema required?** | No — router is the schema | Yes (OpenAPI YAML) | Yes (GraphQL schema) |
@@ -1753,6 +1789,8 @@ Authentication answers "who are you?" and authorization answers "what are you al
 A JSON Web Token is a self-contained, signed string that encodes claims — user ID, roles, expiry time — in a base64url-encoded JSON payload. The server signs it on login; the client presents it in subsequent requests; the server verifies the signature using a secret (HS256) or a public key (RS256) without touching a database. The critical security property — and the one interviewers probe — is that JWTs are *stateless*: once issued, they cannot be revoked before expiry without additional infrastructure such as a token denylist or very short TTLs paired with refresh-token rotation. Refresh-token rotation is the correct pattern: the access token is short-lived (15 min), the refresh token is longer-lived (7 days) and stored in an httpOnly cookie, and exchanging a refresh token for new tokens immediately invalidates the old refresh token — so a stolen refresh token can only be used once before detection.
 
 ### Structure
+
+A JWT has three base64url-encoded, dot-separated parts: header (algorithm), payload (claims), and signature. Only the signature is secret — the header and payload are readable by anyone who intercepts the token.
 
 ```
 header.payload.signature
@@ -1781,6 +1819,8 @@ HMACSHA256(
 ```
 
 ### Access + Refresh Tokens
+
+The secure pattern: short-lived access token (15 min) in memory, long-lived refresh token (7 days) in an httpOnly cookie. Exchanging a refresh token immediately invalidates the old one — a stolen refresh token can only be used once before detection.
 
 ```typescript
 // Generate tokens
@@ -1886,6 +1926,8 @@ function authenticateJWT(req, res, next) {
 
 ### Token Storage
 
+The trade-off is XSS risk (localStorage) vs CSRF risk (httpOnly cookies). Best practice: access token in memory (short-lived, lost on reload), refresh token in an httpOnly + sameSite cookie.
+
 | Storage                  | XSS Vulnerable | CSRF Vulnerable                 | Use Case                                |
 | ------------------------ | -------------- | ------------------------------- | --------------------------------------- |
 | **localStorage**         | ✅ Yes         | ❌ No                           | Not recommended                         |
@@ -1902,6 +1944,8 @@ function authenticateJWT(req, res, next) {
 OAuth 2.0 is a delegation framework — it lets a user authorize a third-party application to access their resources without sharing their credentials. OpenID Connect (OIDC) builds on OAuth to add *identity*: the ID token is a JWT that proves who the user is, not just what they're authorized to access. The **Authorization Code + PKCE** flow is the correct choice for any app with a browser: the auth code returned to the redirect URI is short-lived and single-use, and PKCE (Proof Key for Code Exchange) prevents an intercepted auth code from being exchanged without the original code verifier. **Client Credentials** is for machine-to-machine communication where there is no user — a backend service authenticating to another backend service.
 
 ### Authorization Code Flow + PKCE
+
+PKCE prevents authorization code interception on mobile apps and SPAs. The client generates a code verifier, sends a hash (the challenge) with the authorization request, and proves possession by submitting the original verifier when exchanging the code for tokens.
 
 ```
 1. Client generates code_verifier (random string)
@@ -1928,6 +1972,8 @@ OAuth 2.0 is a delegation framework — it lets a user authorize a third-party a
 
 ### OpenID Connect (OIDC) = OAuth 2.0 + Identity
 
+OIDC adds authentication (who the user is) on top of OAuth 2.0's authorization (what they can access). The ID token is a signed JWT with standard identity claims: `sub`, `email`, `name`, `picture`.
+
 - **OAuth 2.0:** Authorization (access to resources)
 - **OIDC:** Authentication (who the user is)
 
@@ -1942,6 +1988,8 @@ OAuth 2.0 is a delegation framework — it lets a user authorize a third-party a
 Role-Based Access Control assigns permissions to roles and roles to users — simple, predictable, and fast to evaluate because the role lookup is done at login or token issuance. Attribute-Based Access Control evaluates a policy against attributes of the user (department, clearance level), the resource (classification, owner), and the environment (time of day, IP address) at request time. RBAC is the right default for most applications; ABAC is warranted when role explosion becomes real (hundreds of roles to cover every combination of conditions) or when decisions must depend on runtime context that can't be encoded into a static role. The practical middle ground is often **ReBAC** (Relationship-Based, as in Google Zanzibar / SpiceDB) — permissions based on the relationship between user and resource.
 
 ### RBAC (Role-Based Access Control)
+
+RBAC assigns permissions to roles and roles to users. Permission checks look up the user's role at request time and check whether the required action is included.
 
 ```typescript
 enum Role {
@@ -1971,6 +2019,8 @@ if (hasPermission(user, "delete")) {
 **Cons:** Coarse-grained, doesn't handle complex rules.
 
 ### ABAC (Attribute-Based Access Control)
+
+ABAC evaluates a policy against attributes of the user, the resource, and the environment at request time — enabling fine-grained rules that would require hundreds of RBAC roles to encode statically.
 
 ```typescript
 type Policy = {
@@ -2017,6 +2067,8 @@ WebAuthn (Web Authentication) is the W3C standard for passwordless, phishing-res
 
 ### WebAuthn Registration
 
+Registration creates an asymmetric key pair on the user's device. The private key never leaves the device; the server stores only the credential ID and the corresponding public key.
+
 ```typescript
 // Server generates challenge
 const challenge = crypto.randomBytes(32);
@@ -2045,6 +2097,8 @@ const credential = await navigator.credentials.create({
 ```
 
 ### WebAuthn Authentication
+
+Authentication signs a server-issued challenge using the device's private key. The server verifies the signature with the stored public key — no password is transmitted or stored.
 
 ```typescript
 // Server generates challenge
@@ -2098,6 +2152,8 @@ Database choice and optimization are among the most heavily tested backend topic
 SQL (Structured Query Language) is the universal language for relational databases. A solid grasp of joins, aggregations, transactions, and query planning is expected of any senior engineer, regardless of specialisation.
 
 ### JOINs
+
+JOINs combine rows from multiple tables on a matching condition. INNER returns only matching rows; LEFT returns all rows from the left table plus NULLs for non-matching right rows.
 
 ```sql
 -- Sample tables
@@ -2176,6 +2232,8 @@ MySQL is the most widely deployed open-source relational database — the M in t
 
 ### Storage engines
 
+InnoDB is the only viable production engine — ACID-compliant with row-level locking. Its clustered-index architecture (rows stored inside the PK B-tree) means secondary index lookups require two traversals.
+
 | Engine | ACID | Row locking | When to use |
 |---|---|---|---|
 | **InnoDB** | Yes | Yes | All production workloads — the only real option |
@@ -2209,6 +2267,8 @@ Common pattern: one primary for writes, one or more read replicas behind a load 
 
 ### Key syntax differences from PostgreSQL
 
+MySQL uses backtick quoting, `AUTO_INCREMENT`, and `ENUM` column types. These differences trip up engineers migrating queries from PostgreSQL.
+
 ```sql
 -- AUTO_INCREMENT instead of SERIAL / IDENTITY
 CREATE TABLE users (
@@ -2238,6 +2298,8 @@ CREATE INDEX idx_active_email ON users(active_email);
 
 ### EXPLAIN in MySQL
 
+MySQL's `EXPLAIN` shows the query plan without executing it. The `type` column is the key signal: `ALL` is a full table scan; `eq_ref`/`const` indicates an optimal index lookup.
+
 ```sql
 EXPLAIN SELECT * FROM orders WHERE user_id = 123 AND status = 'pending';
 
@@ -2250,6 +2312,8 @@ EXPLAIN SELECT * FROM orders WHERE user_id = 123 AND status = 'pending';
 ```
 
 ### MySQL vs PostgreSQL
+
+PostgreSQL offers a richer feature set (JSONB, partial indexes, richer window functions); MySQL wins on ubiquity and ecosystem familiarity in legacy stacks.
 
 | Feature | MySQL | PostgreSQL |
 |---|---|---|
@@ -2329,6 +2393,8 @@ SELECT * FROM events WHERE created_at > '2024-01-01';
 
 ### EXPLAIN ANALYZE
 
+`EXPLAIN ANALYZE` executes the query and returns actual vs estimated row counts and timings. A large gap between estimated and actual rows signals stale statistics — run `ANALYZE` to refresh them.
+
 ```sql
 EXPLAIN ANALYZE
 SELECT * FROM users WHERE email = 'alice@example.com';
@@ -2356,6 +2422,8 @@ SELECT * FROM users WHERE email = 'alice@example.com';
 - **Index Scan**: Uses index (fast)
 
 ### Window Functions
+
+Window functions compute a value for each row using a sliding window of related rows — without collapsing rows like `GROUP BY`. Useful for rankings, running totals, and moving averages over ordered data.
 
 ```sql
 -- Rank employees by salary within department
@@ -2422,6 +2490,8 @@ SELECT * FROM org_chart ORDER BY level, name;
 ```
 
 ### Transactions & Isolation Levels
+
+PostgreSQL's default isolation (`READ COMMITTED`) prevents dirty reads but allows non-repeatable reads. Use `SERIALIZABLE` for financial operations or any logic that reads-then-writes the same rows in one transaction.
 
 ```sql
 BEGIN;
@@ -2550,6 +2620,8 @@ MongoDB stores data as BSON documents in schema-optional collections. The docume
 
 ### Aggregation Pipeline
 
+MongoDB's aggregation pipeline is the equivalent of SQL's GROUP BY + JOIN + ORDER BY. Each stage transforms the document stream; stages execute in sequence with one stage's output becoming the next's input.
+
 ```javascript
 db.orders.aggregate([
   // Stage 1: Filter
@@ -2675,6 +2747,8 @@ async function updateUser(id: number, data: any) {
 ```
 
 ### Eviction Policies
+
+When Redis hits `maxmemory`, it evicts keys according to the configured policy. `allkeys-lru` is the right choice for a pure cache; `noeviction` is appropriate for a session store where losing data is worse than returning an error.
 
 | Policy           | Behavior                               |
 | ---------------- | -------------------------------------- |
@@ -2872,6 +2946,8 @@ Multi-tenancy is the ability of a single system to serve multiple customers (ten
 
 ### Three isolation models
 
+The isolation model drives cost, compliance posture, and upgrade path. Most SaaS products start with shared schema + RLS and selectively upgrade tenants to stronger isolation.
+
 | Model | Description | Isolation | Cost | Compliance fit |
 | --- | --- | --- | --- | --- |
 | **Shared schema (RLS)** | All tenants in one DB; `tenant_id` column + row-level security policies | Logical | Lowest | Needs careful policy enforcement; shared infra |
@@ -2918,6 +2994,8 @@ export class TenantInterceptor implements NestInterceptor {
 **Critical:** use `SET LOCAL` (transaction-scoped), never `SET` (session-scoped). With a connection pool, a session-level setting will leak to the next request that reuses the connection. Also use parameterised queries (`$1`) rather than string interpolation to prevent SQL injection in the tenant ID itself.
 
 ### Schema-per-tenant provisioning
+
+Provisioning creates a new Postgres schema and runs migrations scoped to it. This is typically done asynchronously in a background job triggered by signup, not inline in the request.
 
 ```typescript
 async function provisionTenant(tenantId: string, db: DataSource) {
@@ -3070,6 +3148,8 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY monthly_revenue;
 ```
 
 ### Cache invalidation patterns
+
+The right pattern depends on how much staleness is tolerable. TTL is simplest; event-driven gives the freshest results at the cost of coordination infrastructure.
 
 | Pattern | How | Trade-off |
 | --- | --- | --- |
@@ -3781,6 +3861,8 @@ These patterns address concerns specific to distributed systems and enterprise a
 
 ### Singleton
 
+Ensures only one instance of a class exists in the process. Commonly used for database connections, config managers, and loggers where multiple instances would be wasteful or incorrect.
+
 ```typescript
 class DatabaseConnection {
   private static instance: DatabaseConnection;
@@ -3796,6 +3878,8 @@ class DatabaseConnection {
 ```
 
 ### Factory
+
+A factory method abstracts object creation behind an interface, letting callers request an instance by type without depending on the concrete class — making it easy to swap implementations.
 
 ```typescript
 interface PaymentGateway {
@@ -3818,6 +3902,8 @@ class PaymentGatewayFactory {
 
 ### Strategy
 
+The Strategy pattern encapsulates interchangeable algorithms behind a common interface. The caller switches behavior at runtime by swapping the injected strategy — without modifying the host class.
+
 ```typescript
 interface SortStrategy {
   sort(data: number[]): number[];
@@ -3839,6 +3925,8 @@ class Sorter {
 ```
 
 ### Repository Pattern
+
+The Repository pattern abstracts data access behind an interface, decoupling business logic from the specific ORM or database. Services depend on the interface — making them unit-testable by injecting a mock repository.
 
 ```typescript
 interface UserRepository {
@@ -3866,6 +3954,8 @@ class UserService {
 ```
 
 ### Circuit Breaker
+
+A circuit breaker wraps calls to a downstream dependency and stops forwarding requests when failure rate exceeds a threshold (OPEN state), preventing cascade failures. After a timeout it probes with a single request (HALF_OPEN) to check recovery.
 
 ```typescript
 enum CircuitState {
@@ -3929,6 +4019,8 @@ class CircuitBreaker {
 ```
 
 ### Saga Pattern (Orchestration)
+
+The Saga pattern manages multi-step distributed transactions without two-phase commit. Each step calls a service; if a step fails, compensating transactions run in reverse to undo completed steps.
 
 ```typescript
 class OrderSaga {
@@ -4132,6 +4224,8 @@ A message broker decouples producers from consumers: the producer publishes a me
 
 ### Point-to-Point (Queue)
 
+One producer, one consumer — each message is delivered to exactly one consumer. Multiple consumers share the load but each message is processed once. Used for task distribution and work queues.
+
 ```
 Producer → Queue → Consumer
 ```
@@ -4140,6 +4234,8 @@ Producer → Queue → Consumer
 - Load balancing across consumers
 
 ### Publish-Subscribe (Topic)
+
+One producer, many subscribers — each subscriber gets an independent copy of each message. Used for event fanout, notifications, and triggering multiple downstream systems from a single event.
 
 ```
 Producer → Topic → Subscriber 1
@@ -4156,6 +4252,8 @@ RabbitMQ is the canonical traditional message broker. It implements **AMQP** and
 
 ### Exchanges
 
+Exchanges are RabbitMQ's routing layer — producers always publish to an exchange, never directly to a queue. The exchange type and message routing key determine which queues receive the message.
+
 | Type        | Routing                                            |
 | ----------- | -------------------------------------------------- |
 | **Direct**  | Exact routing key match                            |
@@ -4164,6 +4262,8 @@ RabbitMQ is the canonical traditional message broker. It implements **AMQP** and
 | **Headers** | Match header attributes                            |
 
 ### Example
+
+This wires a topic exchange to an error-log queue via a binding. Messages published with routing key `logs.error` are routed to `error-logs`; other `logs.*` keys are not.
 
 ```typescript
 import amqp from "amqplib";
@@ -4215,12 +4315,16 @@ Kafka is the dominant event-streaming platform — a distributed, append-only co
 
 ### Concepts
 
+Kafka's data model: a Topic is a logical stream split into ordered Partitions distributed across Brokers. Consumer Groups parallelise consumption — each partition is assigned to exactly one consumer in the group.
+
 - **Topic**: Stream of messages
 - **Partition**: Ordered log (messages append-only)
 - **Consumer Group**: Multiple consumers share partitions
 - **Offset**: Position in partition
 
 ### Producer
+
+Producers publish records to a topic. The record's key determines which partition it lands in — records with the same key always go to the same partition, preserving ordering per key.
 
 ```typescript
 import { Kafka } from "kafkajs";
@@ -4248,6 +4352,8 @@ await producer.disconnect();
 
 ### Consumer
 
+Consumers track their position with an offset. `fromBeginning: true` replays the full partition log from the start — useful for reprocessing events after a bug fix or deploying a new downstream service.
+
 ```typescript
 const consumer = kafka.consumer({ groupId: "analytics-group" });
 await consumer.connect();
@@ -4266,6 +4372,8 @@ await consumer.run({
 
 ### Partitions & Consumer Groups
 
+A topic is split into N partitions; Kafka assigns one partition per consumer in a group. Adding consumers up to the partition count scales throughput linearly — beyond that, extra consumers sit idle.
+
 ```
 Topic: user-events (3 partitions)
 
@@ -4283,6 +4391,8 @@ Messages with same key always go to same partition (ordering guaranteed per key)
 ```
 
 ### Kafka vs RabbitMQ
+
+Choose Kafka for high-throughput event streaming and replay; RabbitMQ for flexible routing, per-message acknowledgements, and task queues.
 
 |                 | Kafka                           | RabbitMQ                     |
 | --------------- | ------------------------------- | ---------------------------- |
@@ -4668,6 +4778,8 @@ WebSockets upgrade an HTTP connection to a persistent, full-duplex TCP channel �
 
 ### Server
 
+The `ws` library provides a minimal WebSocket server. Broadcasting requires iterating `wss.clients` — in production with multiple server instances, add a Redis pub/sub layer to fan out to all connections.
+
 ```typescript
 import { WebSocketServer } from "ws";
 
@@ -4686,6 +4798,8 @@ wss.on("connection", (ws) => {
 ```
 
 ### Client
+
+The browser's native WebSocket API connects to a `wss://` endpoint. In production React apps, use a library like `socket.io-client` for automatic reconnection and room-based message routing.
 
 ```typescript
 const ws = new WebSocket("wss://example.com");

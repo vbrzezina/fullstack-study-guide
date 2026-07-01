@@ -1006,6 +1006,8 @@ Styling approaches have swung hard over the last decade: global stylesheets → 
 
 ### Container Queries (2023+)
 
+Container queries let a component respond to the size of its own container rather than the viewport, enabling true component-level responsive design — the same component can have different layouts depending on where it's placed on the page.
+
 ```css
 .card-container {
   container-type: inline-size;
@@ -1023,6 +1025,8 @@ Styling approaches have swung hard over the last decade: global stylesheets → 
 
 ### :has() Selector (Parent Selector)
 
+`:has()` lets you style a parent based on whether it contains a specific child or descendant — finally making upward selection possible in pure CSS without JavaScript class toggling.
+
 ```css
 /* Style form if it has an invalid input */
 form:has(input:invalid) {
@@ -1036,6 +1040,8 @@ form:has(input:invalid) {
 ```
 
 ### @layer (Cascade Layers)
+
+`@layer` introduces explicit specificity layers. Styles in a later-declared layer always win over an earlier one — regardless of selector weight — giving you control over cascade order without `!important` or ever-escalating specificity.
 
 ```css
 @layer reset, base, components, utilities;
@@ -1058,6 +1064,8 @@ form:has(input:invalid) {
 
 ### View Transitions API
 
+The View Transitions API provides browser-native animated transitions between DOM states. Call `document.startViewTransition()` with a callback that updates the DOM — the browser captures old and new states and interpolates between them using CSS animations.
+
 ```javascript
 document.startViewTransition(() => {
   // Update DOM
@@ -1076,6 +1084,8 @@ document.startViewTransition(() => {
 
 ### CSS Variables + calc()
 
+CSS custom properties (`--name: value`) combined with `calc()`, `min()`, `max()`, and `clamp()` enable dynamic, math-aware design systems without JavaScript — the foundation of modern design tokens and fluid typography.
+
 ```css
 :root {
   --spacing-unit: 8px;
@@ -1093,6 +1103,8 @@ document.startViewTransition(() => {
 Tailwind dominates (~70% of job posts). v4 brings major changes.
 
 ### Key Features
+
+Tailwind v4 (2025) is a near-complete rewrite with an Oxide engine (Rust), CSS-first configuration, and built-in container query support:
 
 - **Oxide engine** (Rust, 10x faster)
 - **CSS-first config** (no more JS config)
@@ -1123,6 +1135,8 @@ CSS-in-JS lets you co-locate styles with components and use JS values (props, th
 
 ### Emotion / styled-components (runtime)
 
+Both libraries co-locate styles with components and let you use JS values (props, theme) directly in CSS. styled-components creates new React components via tagged templates; Emotion adds a `css` prop to existing elements. The trade-off is that styles are generated and injected in the browser at render time.
+
 ```tsx
 // styled-components: tagged-template API
 import styled from "styled-components";
@@ -1149,6 +1163,8 @@ const style = (primary: boolean) => css`
 
 ### CSS Modules (build-time, RSC-safe)
 
+CSS Modules scope class names to the file at build time — the compiler generates unique hashed names, so `.primary` in `Button.module.css` can never collide with `.primary` anywhere else. Zero runtime, works in Server Components with no extra setup. Built into Next.js and Vite.
+
 ```tsx
 // Button.module.css → class names are hashed/scoped at build time
 import styles from "./Button.module.css";
@@ -1157,9 +1173,9 @@ export function Button() {
 }
 ```
 
-Locally-scoped class names, zero runtime, works in Server Components with no extra setup. Built into Next.js and Vite.
-
 ### Zero-runtime CSS-in-JS
+
+Zero-runtime libraries extract CSS to static `.css` files at build time — the styled-components DX without shipping any JavaScript for styling, and fully compatible with Server Components.
 
 ```ts
 // vanilla-extract: TypeScript styles, extracted to static CSS at build
@@ -1330,6 +1346,8 @@ The frontend toolchain is the foundation everything else sits on: how code is bu
 
 ### Vite (De Facto Standard)
 
+Vite's speed comes from two decisions: in development it serves files as native ES modules (no bundling — only the module being imported is processed), and for production it uses Rollup with highly optimised chunking. The result is instant cold starts and fast HMR regardless of project size.
+
 ```typescript
 // vite.config.ts
 import { defineConfig } from "vite";
@@ -1358,11 +1376,15 @@ export default defineConfig({
 
 ### Turbopack (Next.js)
 
+Turbopack is Vercel's Rust-based successor to Webpack, built for Next.js. Its core innovation is incremental computation — only changed modules are recompiled, with results memoized at the function level so even a cold start is fast.
+
 - Built in Rust
 - Incremental computation (caches everything)
 - Next.js default in v15
 
 ### esbuild
+
+esbuild compiles TypeScript and JSX to JavaScript 10–100× faster than Webpack by implementing the entire pipeline in Go with native parallelism. It's a low-level transformer used as a dependency by other tools (Vite uses it for dependency pre-bundling) rather than a standalone build system.
 
 - 10-100x faster than Webpack
 - Used by Vite for deps pre-bundling
@@ -1371,6 +1393,8 @@ export default defineConfig({
 ## 13.2 Monorepos
 
 ### Turborepo
+
+Turborepo orchestrates tasks across monorepo packages using a dependency graph. Its key feature is caching — results are stored locally (and optionally in a shared remote cache) so unchanged packages skip their `build` and `test` tasks entirely.
 
 ```json
 // turbo.json
@@ -1395,6 +1419,8 @@ export default defineConfig({
 - Dependency graph
 
 ### Nx
+
+Nx is a full-featured monorepo framework from Nrwl that adds code generation, a visual dependency graph, and first-party generators for React/Angular/NestJS. More powerful than Turborepo for very large codebases, at the cost of a steeper initial setup.
 
 - More features (code generation, dependency graph viz)
 - Steeper learning curve
@@ -1439,6 +1465,8 @@ packages:
 
 ### Changesets (Versioning)
 
+Changesets manages versioning and changelogs in a monorepo. Contributors drop small markdown files describing their changes; CI collects them, bumps package versions deterministically, and updates `CHANGELOG.md` before publishing to npm.
+
 ```bash
 pnpm changeset      # Create changeset
 pnpm changeset version  # Bump versions
@@ -1449,6 +1477,8 @@ pnpm changeset publish  # Publish to npm
 
 ### Core Web Vitals (Critical for SEO)
 
+Google's Core Web Vitals are the three signals that directly affect search ranking. Each measures a distinct user-experience dimension — loading speed, interactivity, and visual stability.
+
 | Metric                              | Target  | Measures                     |
 | ----------------------------------- | ------- | ---------------------------- |
 | **LCP** (Largest Contentful Paint)  | < 2.5s  | Loading performance          |
@@ -1456,6 +1486,8 @@ pnpm changeset publish  # Publish to npm
 | **CLS** (Cumulative Layout Shift)   | < 0.1   | Visual stability             |
 
 ### Improving LCP
+
+LCP measures how quickly the largest above-the-fold content element loads. The most impactful fixes: server-render the LCP element so it's in the HTML, `preload` it, and serve it from a CDN with image optimisation (WebP/AVIF).
 
 ```tsx
 // 1. Optimize images
@@ -1476,6 +1508,8 @@ pnpm changeset publish  # Publish to npm
 ```
 
 ### Improving INP
+
+INP measures the delay from user input to the next frame paint. Long JavaScript tasks blocking the main thread are the primary cause — break them up with `useDeferredValue`, `startTransition`, or offload to Web Workers.
 
 ```tsx
 // 1. Debounce expensive operations
@@ -1506,6 +1540,8 @@ function VirtualList({ items }) {
 
 ### Improving CLS
 
+CLS measures unexpected layout shifts — content moving as images load or fonts swap in. Fix it by reserving space with explicit dimensions and controlling font loading with `font-display`.
+
 ```css
 /* 1. Reserve space for images */
 img {
@@ -1523,6 +1559,8 @@ img {
 ```
 
 ### Code Splitting
+
+Code splitting defers loading JavaScript until it's actually needed. `React.lazy()` + `Suspense` split at the component level; Next.js's `dynamic()` adds `ssr: false` for components that can't run on the server.
 
 ```tsx
 // React.lazy
@@ -1543,6 +1581,8 @@ const Chart = dynamic(() => import("./Chart"), {
 
 ### Bundle Analysis
 
+Bundle analysis tools generate an interactive treemap showing the size of each module in your production build, revealing oversized dependencies (lodash instead of lodash-es, moment.js, etc.) and duplication across chunks.
+
 ```bash
 # Next.js
 npm run build
@@ -1554,6 +1594,8 @@ npm install -D rollup-plugin-visualizer
 ```
 
 ### Resource Hints
+
+Resource hints instruct the browser to start networking work (DNS, TCP, preload) earlier than it would from parsing HTML alone, eliminating round-trip latency for critical origins and next-page resources.
 
 ```html
 <!-- DNS prefetch -->
@@ -1575,6 +1617,8 @@ npm install -D rollup-plugin-visualizer
 ## 13.4 Web APIs
 
 ### Fetch + AbortController
+
+`AbortController` cancels in-flight `fetch` requests — critical in `useEffect` cleanup to prevent state updates on unmounted components, and to handle race conditions when a user types faster than responses arrive.
 
 ```typescript
 const controller = new AbortController();
@@ -1603,6 +1647,8 @@ useEffect(() => {
 
 ### Intersection Observer (Lazy Loading)
 
+The Intersection Observer fires a callback when an element enters or exits the viewport, without polling via `scroll` events. The standard pattern for lazy-loading images, triggering infinite scroll, and animating elements on scroll.
+
 ```typescript
 const observer = new IntersectionObserver(
   (entries) => {
@@ -1626,6 +1672,8 @@ document.querySelectorAll("img[data-src]").forEach((img) => {
 
 ### Resize Observer
 
+The Resize Observer fires when an element's content box changes size — the correct approach for component-level responsive layout adjustments where CSS container queries aren't available or sufficient.
+
 ```typescript
 const observer = new ResizeObserver((entries) => {
   entries.forEach((entry) => {
@@ -1642,6 +1690,8 @@ observer.observe(element);
 
 ### Mutation Observer
 
+The Mutation Observer fires when the DOM tree changes — child nodes added/removed, attributes modified, or text mutated. Primarily used in libraries and analytics that need to react to DOM changes they don't control.
+
 ```typescript
 const observer = new MutationObserver((mutations) => {
   mutations.forEach((mutation) => {
@@ -1657,6 +1707,8 @@ observer.observe(document.body, {
 ```
 
 ### Web Workers
+
+Web Workers run scripts in a background thread, keeping the main thread free for rendering. Communication is via `postMessage`/`onmessage` — data is structured-cloned between threads (no shared references).
 
 ```typescript
 // main.ts
@@ -1833,6 +1885,8 @@ A `manifest.json` linked in `<head>` is required for the "Add to Home Screen" pr
 
 ### IndexedDB
 
+IndexedDB is the browser's built-in transactional object store, supporting indexes, cursors, and multi-GB data storage. The raw API is callback-based and verbose; production code typically uses the `idb` wrapper library for a promise-based interface.
+
 ```typescript
 const request = indexedDB.open("MyDatabase", 1);
 
@@ -1860,6 +1914,8 @@ request.onsuccess = (event) => {
 
 ### WebSockets
 
+WebSockets open a persistent, full-duplex TCP connection between browser and server. The browser API is event-driven (`onopen`, `onmessage`, `onerror`, `onclose`). In production, use a reconnection wrapper — the native API has no built-in reconnect on failure.
+
 ```typescript
 const ws = new WebSocket("wss://example.com/socket");
 
@@ -1883,6 +1939,8 @@ ws.onclose = () => {
 
 ### Server-Sent Events (SSE)
 
+SSE provides a unidirectional server-to-browser push channel over plain HTTP. The browser maintains a persistent connection and reconnects automatically on failure — simpler than WebSockets for read-only push streams.
+
 ```typescript
 const eventSource = new EventSource("/api/events");
 
@@ -1905,6 +1963,8 @@ eventSource.onerror = () => {
 - WebSocket: Bidirectional, manual reconnection, TCP-based
 
 ### Web Crypto API
+
+The Web Crypto API provides cryptographically strong random number generation (`crypto.getRandomValues`) and a suite of low-level primitives — hash, sign/verify, encrypt/decrypt, key generation — via `crypto.subtle`. All `subtle` operations are async.
 
 ```typescript
 // Generate random bytes
@@ -2077,6 +2137,8 @@ Accessibility is no longer optional. Senior engineers are expected to build acce
 
 ### ARIA Roles
 
+ARIA roles communicate element semantics to assistive technologies when native HTML elements aren't used. The golden rule: always prefer a native element (`<button>`, `<nav>`, `<dialog>`) over an ARIA role on a `<div>` — native elements come with keyboard behaviour and focus management for free.
+
 ```html
 <div role="button" tabindex="0" onclick="...">Click me</div>
 
@@ -2090,6 +2152,8 @@ Accessibility is no longer optional. Senior engineers are expected to build acce
 **Rule of thumb:** Use native HTML when possible. ARIA is a fallback.
 
 ### ARIA Labels
+
+ARIA labelling attributes provide the accessible name that screen readers announce for an element. Use `aria-label` for short inline labels, `aria-labelledby` to reference existing visible text by `id`, and `aria-describedby` for supplementary descriptions.
 
 ```html
 <!-- aria-label -->
@@ -2110,6 +2174,8 @@ Accessibility is no longer optional. Senior engineers are expected to build acce
 
 ### ARIA Live Regions
 
+Live regions tell screen readers to announce content changes that happen outside of user focus. `aria-live="polite"` waits for the user to finish their current activity; `aria-live="assertive"` interrupts immediately — use assertive only for critical errors.
+
 ```html
 <!-- Announce changes to screen readers -->
 <div aria-live="polite" aria-atomic="true">{statusMessage}</div>
@@ -2121,6 +2187,8 @@ Accessibility is no longer optional. Senior engineers are expected to build acce
 **Use for:** Dynamic content updates (notifications, loading states).
 
 ### ARIA States
+
+ARIA state attributes communicate interactive state to assistive technologies — whether a control is expanded, whether a field is invalid, whether an element is hidden. These must be kept in sync with visual state via JavaScript.
 
 ```html
 <button aria-expanded="false" aria-controls="menu" onclick="toggleMenu()">
@@ -2138,6 +2206,8 @@ Accessibility is no longer optional. Senior engineers are expected to build acce
 ## Keyboard Navigation
 
 ### Focus Management
+
+When content appears (modals, drawers, alerts), focus must move into that content — otherwise keyboard users stay on the trigger while the visible page changes around them. On close, focus returns to the element that triggered the interaction.
 
 ```tsx
 function Dialog({ isOpen, onClose }) {
@@ -2166,6 +2236,8 @@ function Dialog({ isOpen, onClose }) {
 
 ### Focus Trapping
 
+Open modals and dialogs must trap focus within themselves — Tab cycling should stay inside the modal, never reaching the background page. Track the first and last focusable elements and redirect Tab/Shift+Tab at the boundaries.
+
 ```typescript
 function trapFocus(element: HTMLElement) {
   const focusableElements = element.querySelectorAll(
@@ -2192,6 +2264,8 @@ function trapFocus(element: HTMLElement) {
 ```
 
 ### Skip Links
+
+A skip link is a visually-hidden anchor at the very top of the page that lets keyboard users jump past repeated navigation directly to main content. It's invisible by default but appears on focus, making it usable without affecting sighted users.
 
 ```html
 <a href="#main-content" class="skip-link"> Skip to main content </a>
@@ -2221,6 +2295,8 @@ function trapFocus(element: HTMLElement) {
 
 ### WCAG AA Requirements
 
+WCAG 2.1 defines minimum contrast ratios between text and its background. These thresholds ensure text remains readable for users with low vision or colour-vision deficiencies.
+
 - **Normal text (< 18pt)**: Contrast ratio ≥ 4.5:1
 - **Large text (≥ 18pt or 14pt bold)**: Contrast ratio ≥ 3:1
 
@@ -2238,6 +2314,8 @@ background: #ffffff;
 
 ### Don't Rely on Color Alone
 
+Color alone is insufficient for conveying information — roughly 8% of men have colour-vision deficiency. Always pair colour cues with a text label, icon, or pattern.
+
 ```html
 <!-- ❌ Bad -->
 <span style="color: red;">Error</span>
@@ -2254,6 +2332,8 @@ background: #ffffff;
 
 ### VoiceOver (macOS)
 
+VoiceOver is the built-in screen reader on macOS and iOS, and the most common tool for web accessibility testing on Mac. The Rotor (`Ctrl + Option + U`) provides quick navigation by heading, link, landmark, or form control.
+
 ```
 Cmd + F5: Enable/disable
 Ctrl + Option + U: Rotor (headings, links, etc.)
@@ -2262,12 +2342,16 @@ Ctrl + Option + Right Arrow: Next element
 
 ### NVDA (Windows, free)
 
+NVDA (NonVisual Desktop Access) is the most widely-used free screen reader on Windows, commonly paired with Firefox for testing. It reads all focusable elements aloud as you navigate with Tab and arrow keys.
+
 ```
 Insert + Down Arrow: Read next line
 Insert + F7: Elements list
 ```
 
 ### Screen Reader Only Text
+
+The `.sr-only` pattern hides text visually (clipped to 1px) while keeping it in the accessibility tree, so screen readers announce context that sighted users can infer from icons or layout.
 
 ```css
 .sr-only {
@@ -2431,6 +2515,8 @@ vi.mock("./api", () => ({
 ```
 
 ### Testing Async Code
+
+Testing async functions requires returning or `await`-ing the promise — if you don't, the test runner treats it as synchronous and may pass before the assertion runs. Use `.rejects.toThrow()` to assert expected rejections.
 
 ```typescript
 it("should fetch user", async () => {

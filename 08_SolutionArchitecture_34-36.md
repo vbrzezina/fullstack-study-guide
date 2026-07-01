@@ -32,6 +32,8 @@ Consistency isn't binary — it's a spectrum of guarantees about *when* a write 
 
 ### Strong Consistency
 
+Under strong consistency, every read returns the most recently committed write — any replica that acknowledges a write has the latest value. This requires coordination on every write, adding latency and reducing availability under network partitions.
+
 ```
 Write to A → Read from B → Gets latest value
 ```
@@ -39,6 +41,8 @@ Write to A → Read from B → Gets latest value
 **Example:** Relational databases (ACID transactions)
 
 ### Eventual Consistency
+
+Under eventual consistency, a write propagates asynchronously — a read immediately after a write may return a stale value, but given enough time (typically milliseconds to seconds) all replicas converge. It trades read correctness for higher throughput and availability.
 
 ```
 Write to A → Read from B (immediately) → May get stale value
@@ -52,6 +56,8 @@ Wait... → Read from B → Gets latest value
 A single-database transaction gives you ACID guarantees for free. The moment a business operation must update two independent services or databases (debit account A in one service, credit account B in another), you've lost that free lunch — there's no shared transaction log to roll back across process boundaries. Distributed transactions are the techniques for keeping multiple systems consistent. The honest senior answer is usually: **avoid them when you can** (model the operation to live in one service), and when you can't, prefer the Saga pattern over 2PC because 2PC's blocking behavior makes it fragile at scale.
 
 ### Two-Phase Commit (2PC)
+
+2PC coordinates a commit across multiple participants: all must vote "yes" in Phase 1 before any commit happens in Phase 2. Its critical weakness is **blocking** — if the coordinator crashes after participants vote yes but before Phase 2, they hold locks indefinitely waiting for a decision that never comes.
 
 ```
 Phase 1: Prepare
@@ -84,6 +90,8 @@ See section 16.2 for implementation.
 An operation is **idempotent** if performing it multiple times has the same effect as performing it once. This is one of the most important practical concepts in distributed systems, because networks force you to retry: a client sends a request, the response is lost, and the client can't tell whether the server processed it. If the operation is idempotent, the client can safely retry; if not, the retry causes a double charge, a duplicate order, or a corrupted balance. The standard mechanism is an **idempotency key** — a client-generated unique ID that the server records, so a repeated request with the same key returns the original result instead of re-executing. Note that `GET`, `PUT`, and `DELETE` are idempotent by HTTP semantics, while `POST` is not — which is exactly why payment and order-creation endpoints need explicit idempotency keys.
 
 ### Why It Matters
+
+The practical danger of non-idempotent operations is the **retry-induced duplicate**: a network error forces the client to retry, but the server already processed the first request — leading to double charges, duplicate orders, or corrupted balances.
 
 ```typescript
 // ❌ Non-idempotent: Creates duplicate charges
@@ -119,6 +127,8 @@ app.post("/charge", async (req, res) => {
 A normal mutex protects a critical section within one process. When multiple processes or servers must coordinate exclusive access to a shared resource (only one worker should process a given order), you need a **distributed lock** — a lock that lives in a shared store all of them can see. The classic implementation uses Redis (Redlock), but distributed locks are deceptively dangerous: a lock holder can pause (GC, network stall) past its TTL while still believing it holds the lock, letting a second holder in. Always set a TTL (so a crashed holder doesn't lock the resource forever), and for correctness-critical work prefer a **fencing token** (a monotonically increasing number checked by the resource) over relying on the lock alone. When you can, design the work to be idempotent so a brief double-execution is harmless — that's more robust than perfect mutual exclusion.
 
 ### Redis Lock (Redlock)
+
+Redlock acquires a distributed lock by writing a key to Redis with a TTL — if the lock holder crashes, the TTL ensures automatic expiry so no process waits forever. The `try/finally` pattern guarantees the lock is released even if the protected work throws.
 
 ```typescript
 import Redlock from "redlock";
@@ -156,6 +166,8 @@ Consistent hashing solves a specific scaling problem: how to distribute keys acr
 
 ### Problem: Traditional Hashing
 
+With naive modulo hashing (`hash(key) % N`), adding or removing a single node changes `N` and remaps the majority of keys — in a cache this triggers a mass-miss storm; in a sharded database it forces a mass data migration.
+
 ```typescript
 function getServer(key: string, serverCount: number): number {
   return hash(key) % serverCount;
@@ -166,6 +178,8 @@ function getServer(key: string, serverCount: number): number {
 ```
 
 ### Solution: Consistent Hashing
+
+Consistent hashing places both servers and keys on a conceptual ring — each key routes to the nearest server clockwise, so adding a server only takes keys from its immediate neighbor (roughly `1/N` of the total). **Virtual nodes** place each physical server at many ring positions to smooth an otherwise-uneven distribution.
 
 ```typescript
 class ConsistentHash {
@@ -215,6 +229,8 @@ Caching trades freshness for speed and load reduction, and the strategy you pick
 
 ### Cache-Aside (Lazy Loading)
 
+In cache-aside, the application owns the cache: check the cache first, fall back to the database on a miss, then populate the cache. A cache failure degrades to slower reads, not errors — making it the most resilient pattern and the default choice.
+
 ```typescript
 async function getUser(id: number) {
   const cached = await redis.get(`user:${id}`);
@@ -228,6 +244,8 @@ async function getUser(id: number) {
 
 ### Write-Through
 
+Write-through updates the cache synchronously on every write, keeping it always in sync with the database. Writes are slower, but reads are always fresh — ideal when stale reads are unacceptable and write throughput is not the bottleneck.
+
 ```typescript
 async function updateUser(id: number, data: any) {
   const user = await db.users.update(id, data);
@@ -237,6 +255,8 @@ async function updateUser(id: number, data: any) {
 ```
 
 ### Cache Stampede (Thundering Herd)
+
+A cache stampede occurs when a popular key expires and many concurrent requests simultaneously find a miss — all hit the database at once, amplifying load by orders of magnitude. The fix is a **distributed lock** so only one request rebuilds the cache while the rest wait.
 
 ```typescript
 // ❌ Problem: Cache expires, 1000 concurrent requests hit DB
@@ -288,6 +308,8 @@ The system design interview tests whether you can take an ambiguous, open-ended 
 
 ### 1. Clarify Requirements (5 min)
 
+Before drawing a single box, pin down the functional scope and non-functional constraints. Getting these wrong early means designing the wrong system — an interviewer who hears you clarifying scale and consistency requirements signals that you know what drives architecture decisions.
+
 **Functional:**
 
 - What features? (user signup, post creation, feed)
@@ -300,6 +322,8 @@ The system design interview tests whether you can take an ambiguous, open-ended 
 - Consistency? (eventual OK? strong required?)
 
 ### 2. Back-of-Envelope Estimation (5 min)
+
+Order-of-magnitude estimates anchor every subsequent design decision: request rate determines whether you need a single server or a fleet; storage volume determines whether a single database is viable or sharding is required.
 
 ```
 Users: 100M
@@ -318,12 +342,16 @@ Storage:
 
 ### 3. High-Level Design (10 min)
 
+Sketch the major components and their relationships — enough to show data flow from client to database and back. This is the surface you'll drill into, so resist adding detail before agreeing on the overall shape.
+
 ```
 Client → Load Balancer → API Servers → Database
                                       → Cache
 ```
 
 ### 4. Deep Dive (20 min)
+
+Pick the two or three areas where real complexity lives — usually the database schema, caching layer, and whatever bottleneck the estimation revealed — and work through them in detail with trade-off reasoning.
 
 - Database schema
 - API design
@@ -332,6 +360,8 @@ Client → Load Balancer → API Servers → Database
 
 ### 5. Trade-offs (5 min)
 
+Close by naming the key trade-offs you made and the alternatives you rejected. Interviewers want to see you understand the cost of every choice; acknowledging what you're sacrificing signals more maturity than claiming your design is the one right answer.
+
 - SQL vs NoSQL
 - Consistency vs Availability
 - Sync vs Async
@@ -339,6 +369,8 @@ Client → Load Balancer → API Servers → Database
 ## 35.2 Practice Problems
 
 ### URL Shortener
+
+The canonical beginner system design problem — covers base-62 encoding for short codes, a counter-vs-hash key generation strategy, a cache-heavy read path (99% reads, 1% writes), and the 302 vs 301 redirect trade-off (302 allows analytics; 301 is cached by browsers).
 
 ```
 POST /api/shorten
@@ -366,6 +398,8 @@ Cache (Redis): short_code → original_url (TTL 1 day)
 
 ### Chat System (WhatsApp)
 
+A chat system's design hinges on the real-time delivery mechanism (WebSockets for persistent connections), message ordering guarantees (timestamp + ID), online presence detection (heartbeat + Redis), and storage layout for efficient retrieval of message history.
+
 ```
 WebSocket connection for real-time
 
@@ -385,6 +419,8 @@ Online presence:
 ```
 
 ### News Feed (Twitter)
+
+The defining trade-off in news feed design is *fan-out strategy*: fan-out-on-write (precompute feeds at post time — fast reads, expensive writes for high-follower accounts) vs fan-out-on-read (compute at read time — fast writes, slower reads). The hybrid routes high-follower celebrities to read-time fan-out.
 
 ```
 Two approaches:
@@ -410,6 +446,8 @@ Schema:
 ```
 
 ### Rate Limiter
+
+Rate limiting is fundamentally a counting algorithm (token bucket, leaky bucket, sliding window) implemented atomically in Redis with a Lua script to prevent race conditions between the check and the decrement.
 
 ```
 Token Bucket Algorithm:
@@ -438,6 +476,8 @@ Lua script (atomic):
 
 ### E-commerce (Inventory)
 
+Inventory management is a concurrency problem: two users simultaneously buying the last item must result in exactly one success. Cover the three standard mechanisms — pessimistic locking (SELECT FOR UPDATE), optimistic locking (version field + conditional update), and Redis atomic decrement.
+
 ```
 Problem: Race condition (overselling)
 
@@ -461,6 +501,8 @@ Solutions:
 ```
 
 ## 35.3 Key Latencies
+
+Internalizing order-of-magnitude latency differences lets you estimate performance budgets and justify design decisions instantly — it's why a cache reduces latency from milliseconds to microseconds, and why a cross-continent call can't be in a hot loop.
 
 | Operation        | Latency |
 | ---------------- | ------- |

@@ -13,6 +13,8 @@ A container packages an application together with its dependencies and runtime i
 
 ### Dockerfile Best Practices
 
+A well-structured Dockerfile produces small, secure images using two key techniques: **multi-stage builds** (build in a toolchain-rich stage, copy only the artifact to a minimal runtime stage) and a **non-root user** (container processes shouldn't run as root by default — doing so exposes the host if a process is compromised).
+
 ```dockerfile
 # Multi-stage build (smaller final image)
 FROM node:20-alpine AS builder
@@ -46,6 +48,8 @@ CMD ["node", "dist/main.js"]
 
 ### Layer Caching
 
+Docker caches each instruction as an immutable layer; changing any instruction invalidates all subsequent layers. Order instructions from least-frequently-changing to most, so dependency installation is only re-run when `package.json` changes — not on every source edit.
+
 ```dockerfile
 # ❌ Bad: Invalidates cache on every code change
 COPY . .
@@ -58,6 +62,8 @@ COPY . .
 ```
 
 ### Docker Compose
+
+Docker Compose orchestrates multi-container local environments: define your services (app, database, cache), their environment variables, ports, and volumes in a single `docker-compose.yml`, then start everything with `docker compose up`.
 
 ```yaml
 version: "3.8"
@@ -102,6 +108,8 @@ volumes:
 ```
 
 ### Security Scanning
+
+Integrate **Trivy** into CI to scan container images for known CVEs before they reach any environment. Run it against the built image and publish results as SARIF so GitHub's Security tab highlights findings inline.
 
 ```yaml
 # .github/workflows/security.yml
@@ -244,6 +252,8 @@ spec:
 
 ### kubectl Commands
 
+The day-to-day `kubectl` commands for cluster management: inspecting resource state, reading logs, exec-ing into a running pod, port-forwarding for local debugging, applying manifests, and performing rollouts and rollbacks.
+
 ```bash
 # Get resources
 kubectl get pods
@@ -282,6 +292,8 @@ kubectl delete pod my-app-abc123
 **CI (Continuous Integration)** means every push is automatically built and tested, so integration problems surface in minutes instead of at a painful merge weeks later. **CD** means either Continuous **Delivery** (every green build is *ready* to ship, deploy is a button) or Continuous **Deployment** (every green build ships to production automatically, no human gate). The pipeline is the executable definition of "what it takes to get code to prod": lint → test → build artifact → scan → deploy. The major platforms differ in surface but not in concept — **GitHub Actions** (workflows of jobs/steps, huge marketplace of reusable actions), **GitLab CI/CD** (a single `.gitlab-ci.yml` of stages and jobs, tightly integrated with GitLab's repo/registry/environments), and **Jenkins** (the veteran, self-hosted, infinitely pluggable via Groovy pipelines, but more to operate). Once you understand stages, jobs, runners, caching, artifacts, and secrets in one, the others translate directly.
 
 ### GitHub Actions
+
+A GitHub Actions workflow is a YAML file that defines **jobs** (parallel or sequential), each with **steps** (shell commands or reusable Actions). The example below shows a full CI/CD pipeline: start a Postgres service container for integration tests, run the test suite, build the Docker image, and push to a registry — all triggered on push to `main` or a PR.
 
 ```yaml
 # .github/workflows/ci.yml
@@ -557,6 +569,8 @@ terraform destroy  # tear it all down
 CloudFormation is AWS's native, declarative IaC service — YAML/JSON templates that AWS deploys as a managed **stack**. Its advantages are being first-party (no extra tooling, deep AWS integration, automatic rollback on failed deploys) and detecting **drift** (resources changed outside the template). Its downsides are verbosity and AWS-only scope. Most teams today write CloudFormation *indirectly* — CDK and AWS SAM both compile down to it, so you rarely hand-write large templates anymore.
 
 ### Choosing an IaC Tool
+
+The right IaC tool depends on cloud scope (AWS-only vs multi-cloud) and team preference for a declarative DSL vs a real programming language — each trade-off is meaningful for long-term maintainability and onboarding.
 
 | | CloudFormation | Terraform | CDK / Pulumi |
 |---|---|---|---|

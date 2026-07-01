@@ -26,6 +26,8 @@ A good interview answer: *"Scope determines which variables are visible where. A
 
 ### Lexical Scope
 
+Scope is determined at write time by where a function is defined, not where it is called. An inner function always has access to the variables of its enclosing scope, even after the outer function has returned.
+
 ```javascript
 function outer() {
   const x = 10;
@@ -214,6 +216,8 @@ Understanding this matters because:
 
 ### Prototype-Based Inheritance (Pre-Class)
 
+Before `class` syntax, inheritance was wired manually through constructor functions and the prototype chain. Understanding this is essential because `class` is syntactic sugar over the same mechanism — knowing the desugared form lets you reason about `instanceof`, prototype pollution, and why shared methods don't belong on `this`.
+
 ```javascript
 // Constructor function — called with `new`
 function Animal(name) {
@@ -283,6 +287,8 @@ Object.getPrototypeOf(Dog.prototype) === Animal.prototype; // true
 
 ### `Object.create` & Pure Prototype Delegation
 
+`Object.create(proto)` creates an object whose prototype is exactly `proto` — no constructor function, no `new`, no implicit properties. This is the purest expression of prototypal inheritance and the basis of patterns like the OLOO (Objects Linking to Other Objects) style.
+
 ```javascript
 // Object.create(proto) creates a new object with `proto` as its prototype.
 // No constructor function needed.
@@ -308,6 +314,8 @@ This protocol is what powers `for...of`, spread (`...`), destructuring, `Array.f
 The value of this abstraction is **lazy evaluation**: you can represent potentially infinite sequences (like a Fibonacci series or a stream of API pages) without computing all values upfront.
 
 ### Custom Iterator (Iterator Protocol)
+
+Any object can be made iterable by implementing `[Symbol.iterator]`, which returns an iterator object with a `next()` method. Once iterable, the object works with `for...of`, spread (`...`), destructuring, and `Array.from`.
 
 ```javascript
 // Making an object iterable by implementing [Symbol.iterator]
@@ -863,6 +871,8 @@ logLength(42);        // ❌ number has no .length
 
 ### Generic Classes
 
+Generics apply to class definitions the same way they do to functions — a type parameter makes the class reusable across entity types while preserving full type safety for every instance. A constraint (`T extends { id: number }`) lets you call methods on `T` that the compiler would otherwise reject.
+
 ```typescript
 // A repository that works with any entity type
 class GenericRepository<T extends { id: number }> {
@@ -898,6 +908,8 @@ TypeScript's type system gets more specific as it analyses code flow. When you c
 Narrowing is important because it lets you work with union types safely. Without it, you'd have to cast constantly. With it, TypeScript proves the type is safe within each branch.
 
 ### Built-in Narrowing Operators
+
+TypeScript's control-flow analysis recognises specific operators and patterns that prove a type is narrower than declared. Each branch below tells the compiler exactly what type `x` must be, enabling you to call type-specific methods without a cast.
 
 ```typescript
 // typeof — narrows primitive types
@@ -1032,6 +1044,8 @@ getUser(789);       // ❌ Type error: number is not assignable to UserId
 ```
 
 ### Builder Pattern with Fluent API
+
+The Builder pattern separates the construction of a complex object from its representation. Each method returns `this`, enabling a fluent chain that reads naturally and composes incrementally — the final `build()` or `execute()` call produces the result. TypeScript's `this` return type preserves the concrete subclass type through the chain so it works correctly with inheritance.
 
 ```typescript
 // The builder accumulates filters and executes them.

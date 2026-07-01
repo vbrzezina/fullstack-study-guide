@@ -13,6 +13,8 @@ The three pillars answer different questions and are strongest in combination. *
 
 ### Logs
 
+Structured logs (JSON) are machine-readable and filterable — the first tool you reach for when debugging a specific request, error, or user action. Include a **correlation/trace ID** on every log line so you can find all events for a single request across services.
+
 **What happened**
 
 ```typescript
@@ -82,6 +84,8 @@ app.get("/metrics", async (req, res) => {
 
 ### Traces
 
+A trace is a tree of timed **spans** — one per service or significant operation — that records exactly where time was spent across a distributed request. Instrumenting with the OpenTelemetry SDK and viewing in Jaeger or Tempo shows the full call chain: which service was slow, which DB query blocked, and how long each hop took.
+
 **Where time was spent**
 
 ```typescript
@@ -125,6 +129,8 @@ getUserOrders (200ms)
 
 ### SLI (Service Level Indicator)
 
+An SLI is the raw metric you actually measure — usually the *ratio of good events to total events* (e.g., successful requests / total requests). It's the foundation everything else is built on.
+
 **Measurement**: What you actually observe
 
 ```
@@ -134,6 +140,8 @@ Example: 99.2% of requests in last 30 days completed successfully
 ```
 
 ### SLO (Service Level Objective)
+
+An SLO is the internal reliability target the engineering team commits to — a number *above* the SLA, set by engineering not by contract, that triggers reliability work when breached.
 
 **Target**: What you aim for
 
@@ -146,6 +154,8 @@ Target latency: p95 < 200ms
 
 ### SLA (Service Level Agreement)
 
+An SLA is the formal, customer-facing contract — typically with financial penalties for breach. It should always be *weaker* than your internal SLO, so breaching the SLO is a warning signal well before you breach the SLA.
+
 **Contract**: What you promise customers
 
 ```
@@ -155,6 +165,8 @@ Penalties if SLO not met
 ```
 
 ### Error Budget
+
+The error budget is the amount of unreliability the SLO allows — if your target is 99.9%, you have 0.1% of requests (roughly 43 min/month of downtime) to spend. When it's exhausted, freeze risky changes and invest in reliability until it replenishes.
 
 ```
 Error Budget = 100% - SLO
@@ -171,6 +183,8 @@ If Error Budget exhausted:
 ## 26.3 Alerting
 
 ### Good Alerts
+
+Good alerts fire on *symptoms* (users experiencing errors) rather than *causes* (CPU spiked), include context and a runbook link, and are tuned to avoid false positives — alert fatigue from noisy alerts is as dangerous as no alerting, because on-call engineers start ignoring pages.
 
 ```yaml
 # Prometheus alert rule
@@ -242,6 +256,8 @@ Security testing happens at different points in the lifecycle, and the three acr
 
 ### SAST (Static Application Security Testing)
 
+SAST analyzes source code *without executing it*, catching injection patterns, hardcoded secrets, and dangerous API calls early in the development cycle — before the code ever runs.
+
 **Tests:** Your code (before running)
 
 ```yaml
@@ -259,6 +275,8 @@ Security testing happens at different points in the lifecycle, and the three acr
 
 ### SCA (Software Composition Analysis)
 
+SCA audits third-party dependencies for known CVEs and license violations. The majority of a modern app's code is open-source, making this the highest-yield security scan for most teams — `npm audit` or Snyk on every PR catches supply-chain vulnerabilities early.
+
 **Tests:** Dependencies (vulnerabilities, licenses)
 
 ```bash
@@ -274,6 +292,8 @@ trivy image myapp:latest
 
 ### DAST (Dynamic Application Security Testing)
 
+DAST attacks a *running* application from the outside — like a real attacker — finding misconfigurations, authentication bypasses, and runtime-only issues that static analysis can't see.
+
 **Tests:** Running application (black-box)
 
 ```bash
@@ -284,6 +304,8 @@ docker run -t owasp/zap2docker-stable zap-baseline.py   -t https://myapp.com
 ## 27.2 OWASP Top 10
 
 ### 1. Broken Access Control
+
+The #1 OWASP risk (2021): a user can access data or perform actions they shouldn't — missing authorization checks, insecure direct object references (`/users/:id` without ownership verification), or misconfigured roles are the most common forms.
 
 ```typescript
 // ❌ Bad: No authorization check
@@ -305,6 +327,8 @@ app.delete("/users/:id", authenticateJWT, async (req, res) => {
 
 ### 2. Cryptographic Failures
 
+Previously called "Sensitive Data Exposure": storing passwords in plain text or with weak hashes (MD5), transmitting secrets over HTTP, or exposing keys in source control. Use bcrypt/argon2 for passwords, HTTPS everywhere, and rotate secrets out of code into environment variables.
+
 ```typescript
 // ❌ Bad: Plain text password
 await db.users.create({ email, password });
@@ -321,6 +345,8 @@ const match = await bcrypt.compare(password, user.password);
 
 ### 3. Injection
 
+Injection attacks insert hostile data into a query or interpreter — SQL injection is the classic form, but command injection, LDAP injection, and XSS follow the same pattern. The defense in all cases: parameterized queries or an ORM; never interpolate untrusted input directly into a query string.
+
 ```typescript
 // ❌ Bad: SQL injection
 const users = await db.query(`SELECT * FROM users WHERE email = '${email}'`);
@@ -333,6 +359,8 @@ const users = await prisma.user.findMany({ where: { email } });
 ```
 
 ### 4. Insecure Design
+
+A design-level category for flows that are missing necessary security controls by architecture — no rate limiting on a password-reset endpoint, no token expiry, predictable reset tokens. The fix requires rethinking the design, not just patching the code.
 
 ```typescript
 // ✅ Good: Secure password reset flow
@@ -363,6 +391,8 @@ app.post("/reset-password/:token", async (req, res) => {
 
 ### 5. Security Misconfiguration
 
+Default credentials left in place, stack traces exposed in error responses, debug endpoints open in production, missing security headers — any deviation from a hardened baseline. The fix: environment-specific configs, generic error messages in production, and automated baseline scans.
+
 ```typescript
 // ✅ Good: Generic error message
 app.use((err, req, res, next) => {
@@ -378,6 +408,8 @@ app.use((err, req, res, next) => {
 ```
 
 ### 7. Identification & Authentication Failures
+
+Weak authentication mechanisms: no rate limiting on login endpoints (enabling brute force), no account lockout, sessions that never expire, or credentials stored client-side. Defense: rate limiting, lockout after N failures, secure session management.
 
 ```typescript
 // ✅ Good: Rate limiting + account lockout
@@ -407,6 +439,8 @@ app.post("/login", loginLimiter, async (req, res) => {
 
 ### 10. Server-Side Request Forgery (SSRF)
 
+SSRF tricks the server into making outbound requests to internal infrastructure — cloud metadata endpoints (`169.254.169.254`), internal databases, or other services the attacker can't reach directly from outside the network. Defense: allowlist permitted domains; block private IP ranges.
+
 ```typescript
 // ✅ Good: Whitelist allowed domains
 const ALLOWED_DOMAINS = ["api.example.com", "cdn.example.com"];
@@ -425,6 +459,8 @@ app.post("/fetch", async (req, res) => {
 ## 27.3 Security Headers
 
 ### Helmet.js
+
+Helmet sets a battery of security-relevant HTTP response headers by default — Content-Security-Policy, HSTS, X-Frame-Options, and more — hardening Express apps against common web attacks with a single `app.use(helmet())` call.
 
 ```typescript
 import helmet from "helmet";

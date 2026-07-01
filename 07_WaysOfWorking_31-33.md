@@ -113,6 +113,8 @@ How branches land on `main` shapes the history and archaeology experience.
 
 ## 25.3 Rebase & History Rewriting
 
+Rebasing replays commits onto a new base, producing a linear history without merge commits. Interactive rebase (`-i`) lets you edit, squash, or drop individual commits before push — useful for cleaning up a messy feature branch. The golden rule: **never rebase commits already on a shared remote branch**, as rewriting shared history requires force-push and breaks teammates' clones.
+
 ```bash
 # Interactive rebase — rewrite last 4 commits before push
 git rebase -i HEAD~4
@@ -197,6 +199,8 @@ Small, focused pull requests are the single biggest lever on review quality and 
 
 ### PR size discipline
 
+Every data point on code review confirms the same finding: review quality degrades sharply above ~400 changed lines, because reviewers can't hold the full change in working memory and resort to rubber-stamping. Smaller PRs get faster, deeper review — and a smaller blast radius for `git bisect`.
+
 | PR size | Lines changed | Review time | Defect escape rate |
 |---|---|---|---|
 | Small | < 200 | 15–30 min | Low |
@@ -212,6 +216,8 @@ Strategies for keeping PRs small:
 - **Preparatory refactors** — separate PR for rename/restructure; feature PR only for the new logic.
 
 ### PR description template
+
+A structured description gives reviewers what they need before they read a single line of diff: the *what* for context, the *why* for motivation, the *how* for non-obvious implementation choices, and a checklist to confirm nothing was skipped.
 
 ```markdown
 ## What
@@ -568,6 +574,8 @@ Production *will* break; maturity is measured by how you respond. Note this buil
 
 ### The incident lifecycle
 
+Every incident follows a predictable arc regardless of the underlying cause. The discipline is running it consistently and in the right order: **mitigate first** (stop user pain — roll back, flip a flag), then root-cause, then learn. Skipping to root-cause while users are still affected is the most common seniority mistake.
+
 ```text
 Detect → Triage → Mitigate → Resolve → Learn
   │         │         │          │         │
@@ -602,6 +610,8 @@ After resolution, write a **blameless postmortem**: timeline, impact, root cause
 Behavioral interviewing is how senior engineers are assessed on non-technical dimensions: how they handle conflict, deliver under ambiguity, mentor others, make architectural trade-offs under constraints, and influence without authority. For a senior role, 30–40% of interview time is typically behavioral. The STAR format gives you a reliable structure for answering "tell me about a time when..." questions concisely and in a way that signals seniority rather than just competence. This section covers the framework, the themes you must have stories for, and the leveling signals that separate a senior answer from a mid-level one.
 
 ### The STAR framework
+
+STAR gives behavioral answers a spine so they don't wander into vague storytelling: a bounded Situation, a specific Task you owned, an Action focused on *your* decisions (not "we"), and a concrete Result with measurable impact. Without the structure, answers signal mid-level; with it, they signal senior.
 
 **S**ituation → **T**ask → **A**ction → **R**esult
 
@@ -644,6 +654,8 @@ The action is specific, first-person, involves concrete artefacts (ADR, spike, s
 
 ### Leveling signals — what separates senior answers
 
+The difference between a mid-level and a senior answer is usually *scope* and *specificity*: seniors name the trade-offs they rejected, drive process-level changes (not just code fixes), and quantify outcomes. Use this table as a self-check when preparing stories.
+
 | Signal | Mid-level answer | Senior answer |
 | --- | --- | --- |
 | **Scope** | Fixed my own code | Changed how the team works |
@@ -675,6 +687,8 @@ These signal senior-level thinking and give you real signal about the role and c
 Feature flags (also: feature toggles, feature switches) are a **deployment decoupling mechanism**: code ships to production dark; the flag controls whether users see it. This separates the *deploy* event from the *release* event — a distinction central to trunk-based development, progressive delivery, and low MTTR. Flags let you merge continuously without long-lived branches, ramp up a risky change to 1% of users before 100%, and roll back instantly without a deploy. This section covers flag types, the three main platforms, targeting rules, and the flag debt lifecycle problem that bites every team.
 
 ### Flag types
+
+Not all flags are equal — **release flags** are temporary (created to safely deploy a feature, then deleted once fully rolled out); **ops flags** are permanent (configuration values like timeouts or rate limits). Mixing them without explicit categorization is the main source of flag debt.
 
 | Type | Description | Example use |
 | --- | --- | --- |
