@@ -652,11 +652,7 @@ return <HydrationBoundary state={dehydrate(qc)}><Todos /></HydrationBoundary>;
 
 # 10. State Management
 
-State management in React has two distinct concerns that are often conflated: **server state** (data from APIs — loading, caching, refetching) and **client state** (UI state — modals open, form values, selected items). TanStack Query owns server state; Zustand/Jotai own client state. This separation eliminates most of the complexity that made Redux necessary.
-
-## Evolution of React State Management
-
-The landscape has shifted dramatically. Redux is no longer the default choice for new projects.
+State management in React separates into two distinct concerns: **server state** (data fetched from APIs — loading, caching, revalidation) and **client state** (UI state — open modals, selected tabs, wizard progress). Libraries like TanStack Query and SWR own server state in SPA architectures; Redux, Context, and MobX own client state. The important caveat for modern Next.js projects: React Server Components shift data fetching to the server, removing the need for client-side cache management for the initial render — which changes the value proposition of every library in this section. This section covers the full landscape and ends with an honest look at what still earns its place in an RSC world.
 
 ## 10.1 Built-in Solutions
 
@@ -664,7 +660,7 @@ The landscape has shifted dramatically. Redux is no longer the default choice fo
 
 The built-in solution — no dependencies needed. `useReducer` provides predictable state transitions; `createContext` + `Provider` makes the state accessible to any descendant.
 
-**When to use:** Small apps, component-local complex state. **Avoid for:** Frequently changing state shared across many components — every context change re-renders all consumers.
+**When to use:** Global UI state (theme, auth), component-local complex state. **Avoid for:** Frequently changing state shared across many components — every context change re-renders all consumers.
 
 ```typescript
 type State = { count: number; user: User | null };
@@ -680,7 +676,7 @@ const AppContext = createContext<{
 function reducer(state: State, action: Action): State {
   switch (action.type) {
     case 'INCREMENT':
-      return { ...state, count: state.count + 1 };    // ← always return a new object
+      return { ...state, count: state.count + 1 };
     case 'SET_USER':
       return { ...state, user: action.payload };
     default:
@@ -698,135 +694,74 @@ function AppProvider({ children }: { children: ReactNode }) {
 }
 ```
 
-## 10.2 Zustand (MOST POPULAR 2024)
+## 10.2 Flux Architecture
 
-Zustand is a minimal, unopinionated state management library. A store is a hook — you define state and actions in one place, no Providers required. The key insight: `useStore(selector)` means components only re-render when their selected slice changes, not when any part of the store changes.
+Flux is the unidirectional data-flow pattern Facebook introduced in 2014 to tame the two-way binding that made MVC React apps hard to reason about as they scaled. The core insight: **data flows in one direction only** — Action → Dispatcher → Store → View — and the View never updates the Store directly. Redux is the canonical implementation of this pattern.
 
-**Why Zustand won:** No boilerplate, no Provider, granular subscriptions, TypeScript-first, middleware ecosystem (devtools, persist, immer). This is the default choice for new projects that need more than `useState`.
-
-```typescript
-import { create } from 'zustand';
-import { devtools, persist } from 'zustand/middleware';
-
-interface BearState {
-  bears: number;
-  increase: () => void;
-  reset: () => void;
-}
-
-const useBearStore = create<BearState>()(
-  devtools(       // ← Redux DevTools integration
-    persist(      // ← persists to localStorage
-      (set) => ({
-        bears: 0,
-        increase: () => set((state) => ({ bears: state.bears + 1 })),
-        reset: () => set({ bears: 0 }),
-      }),
-      { name: 'bear-storage' }    // ← localStorage key
-    )
-  )
-);
-
-function BearCounter() {
-  // This component only re-renders when bears changes — not when other store values change
-  const bears = useBearStore((state) => state.bears);
-  const increase = useBearStore((state) => state.increase);
-  return <button onClick={increase}>{bears} bears</button>;
-}
+```
+User Interaction
+      ↓
+   Action         { type: 'ADD_TO_CART', payload: item }
+      ↓
+  Dispatcher      routes the action to all registered stores
+      ↓
+    Store         pure function: (prevState, action) → nextState
+      ↓
+    View          re-renders from the new state
 ```
 
-## 10.3 Jotai (Atomic State)
+**Why Flux mattered:** Before it, a button click in one component could trigger cascading mutations across unrelated components through shared mutable objects — bugs that were nearly impossible to reproduce. Flux made every state change an explicit, inspectable event. The same principle drives React's own rendering model: you never mutate state in place, you always describe the next state.
 
-Jotai takes a bottom-up approach: the unit of state is an atom (a single value), and you compose atoms to build complex state. Derived atoms (computed from other atoms) only re-compute when their dependencies change. Works natively with React Suspense for async atoms.
+**Interview framing:** "Explain Flux" is the gateway question to Redux. Interviewers want: one-way data flow, actions as plain objects describing what happened, reducers as pure functions that compute the next state, single store as the source of truth.
 
-**Use for:** Fine-grained reactive state, Suspense-native async state, when you want React-like composability for state.
+## 10.3 Redux & Redux Toolkit
+
+Redux is the dominant implementation of Flux. At its core: a single immutable state tree (the **store**), **actions** (plain objects describing what happened), and **reducers** (pure functions computing the next state). Redux remains pervasive in large codebases started before ~2022, and Redux Toolkit significantly reduced its boilerplate.
+
+### Core concepts
+
+The three principles:
+1. **Single source of truth** — the entire app state lives in one store.
+2. **State is read-only** — the only way to change state is to dispatch an action.
+3. **Changes via pure functions** — reducers take `(prevState, action)` and return `newState`; no side effects, no mutation.
 
 ```typescript
-import { atom, useAtom } from 'jotai';
+// Action — plain object describing what happened
+const increment    = { type: 'counter/increment' };
+const addUser      = { type: 'users/add', payload: { id: 1, name: 'Alice' } };
 
-const countAtom = atom(0);                                   // ← primitive atom
-const doubleAtom = atom((get) => get(countAtom) * 2);       // ← derived: auto-updates
-
-function Counter() {
-  const [count, setCount] = useAtom(countAtom);
-  const [double] = useAtom(doubleAtom);    // ← read-only derived value
-
-  return (
-    <div>
-      <p>{count} (double: {double})</p>
-      <button onClick={() => setCount(c => c + 1)}>+</button>
-    </div>
-  );
+// Reducer — (state, action) → newState
+function counterReducer(state = 0, action: { type: string }) {
+  switch (action.type) {
+    case 'counter/increment': return state + 1;
+    case 'counter/decrement': return state - 1;
+    default:                  return state;
+  }
 }
+
+// Store
+import { createStore } from 'redux';
+const store = createStore(counterReducer);
+
+store.dispatch({ type: 'counter/increment' });
+console.log(store.getState()); // 1
+
+// Subscribe to state changes
+store.subscribe(() => console.log(store.getState()));
 ```
 
-## 10.4 TanStack Query (Server State)
+### Redux Toolkit (RTK)
 
-TanStack Query manages the full lifecycle of server data: fetching, caching, background refetching, optimistic updates, and synchronisation. The mental model: every piece of server data has a `queryKey` — TanStack Query owns the caching layer for that key. This replaces `useEffect` + `useState` for data fetching entirely.
-
-**Why it matters:** Eliminates loading/error/data boilerplate, provides automatic background refetch on window focus, handles race conditions, and makes cache invalidation explicit. For any app with API data, this is a must-have.
+Redux Toolkit is the official, opinionated way to write Redux. It eliminates boilerplate with `createSlice` and uses **Immer** under the hood — letting you write apparently mutable reducer code that actually produces a new state object.
 
 ```typescript
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-
-function Users() {
-  const queryClient = useQueryClient();
-
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['users'],          // ← cache key; same key anywhere = same cache entry
-    queryFn: async () => {
-      const res = await fetch('/api/users');
-      return res.json();
-    },
-    staleTime: 5000,             // ← consider data fresh for 5s (no background refetch)
-    gcTime: 10 * 60 * 1000,     // ← keep unused data in cache for 10min
-  });
-
-  const mutation = useMutation({
-    mutationFn: (newUser: User) => fetch('/api/users', {
-      method: 'POST',
-      body: JSON.stringify(newUser),
-    }),
-    onSuccess: () => {
-      // Invalidate the 'users' cache — triggers a background refetch
-      queryClient.invalidateQueries({ queryKey: ['users'] });
-    },
-  });
-
-  if (isLoading) return <div>Loading...</div>;
-  if (error) return <div>Error: {error.message}</div>;
-
-  return (
-    <div>
-      {data.map(user => <div key={user.id}>{user.name}</div>)}
-      <button onClick={() => mutation.mutate({ name: 'Alice' })}>
-        Add User
-      </button>
-    </div>
-  );
-}
-```
-
-**Features:** Caching, deduplication, background refetching, polling, window-focus refetch, optimistic updates, infinite queries, pagination.
-
-**Use for:** API data, not UI state. Replaces Redux for most server data needs.
-
-## 10.5 Redux Toolkit (Legacy but Still Common)
-
-Redux Toolkit (RTK) is the modern, official way to write Redux. It uses Immer under the hood (which is why you can appear to mutate state in reducers), reduces boilerplate with `createSlice`, and includes RTK Query for data fetching. Still common in large codebases — knowing it is important for joining existing teams.
-
-```typescript
-import { createSlice, configureStore, PayloadAction } from "@reduxjs/toolkit";
-
-interface CounterState { value: number }
+import { createSlice, configureStore, PayloadAction } from '@reduxjs/toolkit';
 
 const counterSlice = createSlice({
-  name: "counter",
-  initialState: { value: 0 } as CounterState,
+  name: 'counter',
+  initialState: { value: 0 },
   reducers: {
-    increment: (state) => {
-      state.value += 1;   // ← Immer makes this safe — it's not actually mutation
-    },
+    increment: (state) => { state.value += 1; },          // Immer: safe apparent mutation
     incrementByAmount: (state, action: PayloadAction<number>) => {
       state.value += action.payload;
     },
@@ -837,58 +772,257 @@ export const { increment, incrementByAmount } = counterSlice.actions;
 
 const store = configureStore({
   reducer: { counter: counterSlice.reducer },
+  middleware: (getDefault) => getDefault().concat(analyticsMiddleware),
 });
 
-export type RootState = ReturnType<typeof store.getState>;
+export type RootState   = ReturnType<typeof store.getState>;
 export type AppDispatch = typeof store.dispatch;
 ```
 
-**Still used in:** Large legacy codebases, complex middleware needs. **Avoid for:** New projects (Zustand is simpler).
-
-## 10.6 XState (State Machines)
-
-XState models behaviour as an explicit finite state machine — every possible state is declared up front, and transitions between states are named events. This eliminates impossible states (e.g., `isLoading: true` + `error: "..."` simultaneously) by making invalid combinations unrepresentable.
-
-**Use for:** Complex multi-step flows (checkout, onboarding wizards), when correctness of state transitions is critical, when you need to visualise behaviour.
+Async operations use `createAsyncThunk`:
 
 ```typescript
-import { createMachine, interpret } from "xstate";
-
-const toggleMachine = createMachine({
-  id: "toggle",
-  initial: "inactive",
-  states: {
-    inactive: { on: { TOGGLE: "active" } },     // ← from inactive, TOGGLE goes to active
-    active:   { on: { TOGGLE: "inactive" } },   // ← from active, TOGGLE goes to inactive
-  },
+export const fetchUsers = createAsyncThunk('users/fetchAll', async () => {
+  const res = await fetch('/api/users');
+  return res.json();
 });
 
-const service = interpret(toggleMachine).start();
-service.send("TOGGLE");   // inactive → active
-service.send("TOGGLE");   // active → inactive
+const usersSlice = createSlice({
+  name: 'users',
+  initialState: { items: [] as User[], status: 'idle' as 'idle' | 'loading' | 'succeeded' | 'failed' },
+  reducers: {},
+  extraReducers: (builder) => {
+    builder
+      .addCase(fetchUsers.pending,   (state) => { state.status = 'loading'; })
+      .addCase(fetchUsers.fulfilled, (state, action) => {
+        state.status = 'succeeded';
+        state.items  = action.payload;
+      })
+      .addCase(fetchUsers.rejected,  (state) => { state.status = 'failed'; });
+  },
+});
 ```
 
-## 10.7 Comparison Table
+### RTK Query
 
-| Library                  | Use Case                      | Learning Curve | Bundle Size | Re-render Optimization |
-| ------------------------ | ----------------------------- | -------------- | ----------- | ---------------------- |
-| **Context + useReducer** | Small apps, no deps           | Low            | 0           | Manual                 |
-| **Zustand**              | Most apps (NEW DEFAULT)       | Low            | 1.2 KB      | Automatic (selectors)  |
-| **Jotai**                | Atomic state, Suspense        | Medium         | 3 KB        | Automatic              |
-| **TanStack Query**       | Server state (API data)       | Medium         | 13 KB       | N/A (caching)          |
-| **Redux Toolkit**        | Legacy, complex middleware    | High           | 9 KB        | Manual (reselect)      |
-| **XState**               | State machines, complex flows | High           | 25 KB       | N/A                    |
+RTK Query is Redux Toolkit's built-in data fetching and caching layer. Define endpoints once; it auto-generates React hooks, manages cache, handles loading state, and invalidates related queries on mutation — no `createAsyncThunk` boilerplate.
+
+```typescript
+import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
+
+export const usersApi = createApi({
+  reducerPath: 'usersApi',
+  baseQuery: fetchBaseQuery({ baseUrl: '/api' }),
+  tagTypes: ['User'],
+  endpoints: (builder) => ({
+    getUsers: builder.query<User[], void>({
+      query: () => '/users',
+      providesTags: ['User'],
+    }),
+    createUser: builder.mutation<User, Partial<User>>({
+      query: (body) => ({ url: '/users', method: 'POST', body }),
+      invalidatesTags: ['User'],   // auto-refetches getUsers after this mutation
+    }),
+  }),
+});
+
+export const { useGetUsersQuery, useCreateUserMutation } = usersApi;
+```
+
+**When Redux still makes sense:**
+- Existing Redux codebase — migrating to RTK is low-risk; migrating away is high-effort
+- Complex middleware needs: analytics pipelines, request deduplication, logging
+- Large teams where strict unidirectional flow and action audit trails are required
+
+## 10.4 MobX
+
+MobX takes the opposite philosophy from Redux: instead of explicit actions and immutable state, it uses **observable reactive state** — you mutate objects directly, and MobX automatically tracks which components depend on which observables and re-renders only what changed.
+
+```typescript
+import { makeAutoObservable } from 'mobx';
+import { observer } from 'mobx-react-lite';
+
+class CartStore {
+  items: CartItem[] = [];
+  discount = 0;
+
+  constructor() {
+    makeAutoObservable(this);  // properties → observable, methods → actions, getters → computed
+  }
+
+  addItem(item: CartItem) {
+    this.items.push(item);    // direct mutation — MobX handles re-renders automatically
+  }
+
+  get total() {
+    return this.items.reduce((sum, i) => sum + i.price, 0) * (1 - this.discount);
+  }
+}
+
+const cart = new CartStore();
+
+const CartView = observer(() => (   // re-renders when any observed value changes
+  <div>Total: {cart.total}</div>
+));
+```
+
+**When MobX makes sense:** Domain-rich applications with complex object graphs (e-commerce, CRM), teams comfortable with OOP patterns, existing MobX codebases. **Tradeoff:** Less predictable than Redux — mutations can happen anywhere; implicit reactivity is ergonomic until something re-renders unexpectedly.
+
+## 10.5 SWR
+
+SWR (stale-while-revalidate) is Vercel's lightweight data-fetching hook. The name is the caching strategy: serve stale data immediately, revalidate in the background, update when fresh data arrives.
+
+```typescript
+import useSWR from 'swr';
+import useSWRMutation from 'swr/mutation';
+
+const fetcher = (url: string) => fetch(url).then(r => r.json());
+
+function UserProfile({ id }: { id: string }) {
+  const { data, error, isLoading, mutate } = useSWR(`/api/users/${id}`, fetcher, {
+    revalidateOnFocus: true,
+    dedupingInterval:  2000,
+  });
+
+  const { trigger } = useSWRMutation(
+    `/api/users/${id}`,
+    async (url, { arg }: { arg: Partial<User> }) => {
+      await fetch(url, { method: 'PATCH', body: JSON.stringify(arg) });
+      mutate();
+    }
+  );
+
+  if (isLoading) return <Spinner />;
+  if (error)     return <ErrorView />;
+  return <div onClick={() => trigger({ name: 'Alice' })}>{data.name}</div>;
+}
+```
+
+**SWR vs TanStack Query:**
+
+| | SWR | TanStack Query |
+|---|---|---|
+| Bundle | ~4 KB | ~13 KB |
+| Mutations | Basic (`useSWRMutation`) | Full (optimistic, rollback) |
+| Infinite queries | Basic | First-class |
+| DevTools | None | Yes |
+| Offline support | No | Yes |
+
+SWR wins on simplicity and bundle size. TanStack Query wins on feature breadth. Both become less relevant in RSC apps (see §10.7).
+
+## 10.6 TanStack Query
+
+TanStack Query manages the full lifecycle of server data: fetching, caching, background refetching, and synchronisation. Every piece of server data has a `queryKey` — TanStack Query owns the cache for that key.
+
+```typescript
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+
+function Users() {
+  const queryClient = useQueryClient();
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['users'],
+    queryFn:  () => fetch('/api/users').then(r => r.json()),
+    staleTime: 5000,
+    gcTime:    10 * 60 * 1000,
+  });
+
+  const mutation = useMutation({
+    mutationFn: (newUser: User) =>
+      fetch('/api/users', { method: 'POST', body: JSON.stringify(newUser) }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
+  });
+
+  if (isLoading) return <Spinner />;
+  if (error)     return <Error message={error.message} />;
+  return (
+    <div>
+      {data.map(u => <div key={u.id}>{u.name}</div>)}
+      <button onClick={() => mutation.mutate({ name: 'Alice' })}>Add</button>
+    </div>
+  );
+}
+```
+
+**Key features:** Caching, request deduplication, background refetch on window focus, polling, optimistic updates with automatic rollback, infinite queries, pagination.
+
+## 10.7 State Management in the RSC Era
+
+React Server Components change the calculus for every library in this section, and it is worth being honest about which problems they no longer solve.
+
+### What RSC removes
+
+In a Next.js App Router app, **data fetching moves to the server**:
+
+```typescript
+// Server Component — fetch runs on the server, no client JS bundle needed
+async function UserList() {
+  const users = await fetch('/api/users', { next: { revalidate: 60 } }).then(r => r.json());
+  return users.map((u: User) => <div key={u.id}>{u.name}</div>);
+}
+```
+
+Server Actions replace client-side mutations:
+
+```typescript
+'use server'
+async function createUser(formData: FormData) {
+  await db.users.create({ name: formData.get('name') as string });
+  revalidatePath('/users');
+}
+
+// No useQuery or useMutation needed here
+<form action={createUser}><button>Add</button></form>
+```
+
+**What this eliminates client-side:** the entire `isLoading / data / error` trilogy for initial page data, client-side fetch caches, and most of what TanStack Query / SWR / RTK Query were solving for reads.
+
+### What still needs client-side state
+
+RSC eliminates *server state from the client* — it does not eliminate client state:
+
+- **UI state** — open drawers, selected tabs, dark mode — always client
+- **Optimistic UI** — `useOptimistic` for simple cases; TanStack Query's `useMutation` with rollback for complex cases where you need granular control
+- **Client-side filtering/sorting** — after the server delivers a list, filtering it locally
+- **Multi-step wizard state** — form data spanning multiple steps before submission
+- **Real-time** — WebSocket or SSE subscriptions, live cursors, collaborative editing
+- **Non-RSC apps** — SPAs built with Vite, React Native, apps that can't adopt App Router
+
+### Practical guidance
+
+| App type | Recommended approach |
+|---|---|
+| Next.js App Router | Server Components for fetches; Server Actions + `revalidatePath` for mutations; Context or Redux for global UI state only |
+| SPA (Vite/CRA) | TanStack Query or SWR for server state; Redux or MobX for complex client state |
+| Existing Redux codebase | Migrate to RTK; consider RTK Query for data fetching over raw `createAsyncThunk` |
+| Complex domain model | MobX |
+
+**Interview framing:** "When would you reach for TanStack Query vs Server Components?" — In an RSC app, Server Components handle reads and Server Actions handle mutations. TanStack Query earns its place when you need optimistic updates with rollback, real-time polling, or infinite scroll — cases where the client genuinely owns the data lifecycle rather than just displaying server-rendered HTML.
+
+## 10.8 Comparison Table
+
+| Library | Use Case | RSC-relevant? | Bundle |
+|---|---|---|---|
+| **Context + useReducer** | Global UI state, no deps | Yes — always relevant | 0 |
+| **Redux / RTK** | Complex client state, middleware, large teams | Yes — for client state | 9 KB |
+| **RTK Query** | CRUD + cache within a Redux app | Limited (RSC handles reads) | (in RTK) |
+| **MobX** | OOP domain models, reactive state | Yes — client state | 16 KB |
+| **SWR** | Lightweight API fetching (SPA) | No — RSC replaces for RSC apps | 4 KB |
+| **TanStack Query** | Rich server state (SPA/CSR), optimistic UI | Partially — mutations + realtime | 13 KB |
 
 ## State Management Priority Summary
 
-| Library                  | Priority     | Notes                                     |
-| ------------------------ | ------------ | ----------------------------------------- |
-| **Context + useReducer** | **Refresh**  | Built-in, small apps                      |
-| **Zustand**              | **Critical** | Lightweight, most popular now             |
-| **Jotai**                | **Learn**    | Atomic state                              |
-| **Redux Toolkit**        | **Know**     | Legacy, still in many codebases           |
-| **TanStack Query**       | **Critical** | Server state (you'll use this everywhere) |
-| **XState**               | **Know**     | State machines                            |
+| Topic | Priority | Notes |
+|---|---|---|
+| **Context + useReducer** | **Important** | Built-in, always relevant |
+| **Flux architecture** | **Deep** | Foundation of Redux; common interview question |
+| **Redux core concepts** | **Deep** | Pervasive in existing codebases |
+| **Redux Toolkit (RTK)** | **Important** | Modern Redux; Immer, createSlice, async thunks |
+| **RTK Query** | **Learn** | Redux's built-in data fetching layer |
+| **MobX** | **Know** | Less common but present in enterprise |
+| **SWR** | **Know** | Lightweight fetching for SPAs |
+| **TanStack Query** | **Deep** | Best-in-class for SPA server state; mutations in RSC apps |
+| **RSC + Server Actions** | **Critical** | Replaces client-side data fetching in Next.js App Router |
 
 ---
 
