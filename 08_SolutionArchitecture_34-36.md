@@ -284,6 +284,79 @@ async function getPopularItem(id: number) {
 }
 ```
 
+## 34.8 Microservice Architecture
+
+Microservice architecture structures an application as a collection of small, independently deployable services, each owning its own data and communicating via APIs or message brokers. It's a widely used pattern in JS/Node.js — NestJS is largely designed around it, and it's the dominant model for large-scale Node.js backends (alongside serverless, which is a different execution model entirely).
+
+### Monolith vs Microservices
+
+```
+Monolith                          Microservices
+─────────                         ─────────────
+┌──────────────────┐              ┌──────────┐  ┌───────────┐
+│  Orders          │              │  Orders  │  │ Inventory │
+│  Inventory       │              │ Service  │  │  Service  │
+│  Payments        │              └────┬─────┘  └─────┬─────┘
+│  Notifications   │                   │  message broker  │
+│                  │              ┌────┴─────┐  ┌─────┴─────┐
+│  [single DB]     │              │ Payments │  │Notifications│
+└──────────────────┘              │ Service  │  │  Service  │
+one deployable unit               └──────────┘  └───────────┘
+                                  each deploys independently
+                                  each owns its own DB
+```
+
+| | Monolith | Microservices |
+| --- | --- | --- |
+| **Deployment** | One unit | Independent per service |
+| **Scaling** | Scale everything | Scale individual bottlenecks |
+| **Data** | Shared DB | Each service owns its data |
+| **Team** | One codebase | Teams own services end-to-end |
+| **Latency** | In-process calls | Network calls between services |
+| **Complexity** | Low (at first) | High operational overhead |
+| **Testing** | Easier to integration test | Requires contract testing |
+
+Start with a monolith. Move to microservices when a specific service has meaningfully different scaling, deployment, or team-ownership requirements — not before.
+
+### Core Concerns
+
+**Service boundaries** — split by business domain (DDD bounded contexts), not by technical layer. `OrderService`, `InventoryService`, `PaymentService` are good boundaries. `DatabaseService` or `ValidationService` are not.
+
+**Inter-service communication** — two modes:
+- **Synchronous** (HTTP/REST, gRPC): caller waits for a response. Simpler to reason about but couples availability — if the downstream service is slow or down, the caller is too.
+- **Asynchronous** (message broker: RabbitMQ, Kafka, SQS): fire-and-forget or event-driven. Decouples availability but introduces eventual consistency.
+
+**API Gateway** — a single entry point for external clients. Routes requests to the right service, handles cross-cutting concerns (auth, rate limiting, TLS termination) so individual services don't have to.
+
+**Data isolation** — no shared databases between services. If Service A needs data owned by Service B, it asks Service B via API or reads a replicated projection updated via events. Shared databases are the most common way microservices fail to deliver their promises.
+
+**Distributed tracing** — a single user request now spans multiple services. OpenTelemetry trace IDs propagated in headers let you reconstruct the full call chain in Jaeger or Datadog (§26).
+
+### Microservices vs Serverless (Lambda)
+
+This is a common source of confusion because both are "distributed" and "event-driven", but they have fundamentally different execution models.
+
+**Microservices** are long-running processes. A NestJS microservice boots once, maintains persistent connections to its message broker, and processes many requests over its lifetime. RabbitMQ works here because the service maintains a live consumer connection.
+
+**Lambda functions** are stateless and ephemeral. They start on invocation, process one event, and exit. They cannot maintain a persistent connection to RabbitMQ (the process ends before the next message arrives). This is why the AWS event-driven pattern looks different:
+
+```
+RabbitMQ/persistent consumer         AWS serverless event-driven
+────────────────────────────         ───────────────────────────
+
+[RabbitMQ] ──persistent──► [NestJS   [EventBridge / SQS / SNS]
+            connection       Micro-        │
+                             service]      │ invokes per event
+                                           ▼
+                                        [Lambda]  (starts, runs, exits)
+```
+
+AWS manages the queue and invokes your Lambda once per message/event — you never write the consumer loop. SQS delivers messages in batches to Lambda; SNS fans out a single event to multiple Lambda subscribers; EventBridge routes events by pattern to different Lambdas. The equivalent of a persistent RabbitMQ consumer is an SQS queue with a Lambda event source mapping.
+
+**Rule of thumb:**
+- Long-running service with shared state, persistent broker connections, or steady traffic → containerised microservice
+- Event-driven, spiky traffic, short-lived processing, no persistent state needed → Lambda + AWS event services
+
 ## Distributed Systems Priority Summary
 
 | Topic                                 | Priority     |
@@ -296,6 +369,10 @@ async function getPopularItem(id: number) {
 | Consistent Hashing                    | **Deep**     |
 | Cache strategies + invalidation       | **Critical** |
 | Cache stampede                        | **Know**     |
+| **Microservice Architecture**         |              |
+| Monolith vs microservices trade-offs  | **Critical** |
+| Service boundaries & data isolation   | **Deep**     |
+| Microservices vs Lambda/serverless    | **Deep**     |
 
 ---
 

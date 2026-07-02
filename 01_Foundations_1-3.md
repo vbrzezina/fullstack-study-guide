@@ -22,8 +22,6 @@ Strong foundations separate senior engineers from mid-level ones. Interviewers p
 
 **Closure** is what happens when a function "remembers" the variables from the scope where it was defined, even after that scope has finished executing. Every function in JavaScript forms a closure — it carries a reference to its outer scope with it wherever it goes.
 
-A good interview answer: *"Scope determines which variables are visible where. A closure is a function that retains access to variables from its outer scope even after that scope has returned. This lets us do things like data encapsulation, memoization, and factory functions — because the inner function keeps a live reference to the outer variables, not a copy."*
-
 ### Lexical Scope
 
 Scope is determined at write time by where a function is defined, not where it is called. An inner function always has access to the variables of its enclosing scope, even after the outer function has returned.
@@ -817,6 +815,43 @@ type A = Awaited<Promise<string>>;            // string
 type B = Awaited<Promise<Promise<number>>>;   // number (recursively unwrapped)
 ```
 
+### Pick / Omit vs Extract / Exclude
+
+These four are the most commonly confused utility types. The key distinction: **Pick and Omit operate on object shapes (keys); Extract and Exclude operate on union members**.
+
+```typescript
+type User = { id: number; name: string; password: string };
+
+// ── Object types: filter by key ───────────────────────────────────
+type PublicUser = Pick<User, 'id' | 'name'>;   // { id: number; name: string }
+type SafeUser   = Omit<User, 'password'>;       // { id: number; name: string }
+// Pick = keep listed keys. Omit = drop listed keys. Same result, different direction.
+
+// ── Union types: filter by member ────────────────────────────────
+type Status = 'pending' | 'active' | 'banned' | 'deleted';
+
+type LiveStatus    = Extract<Status, 'pending' | 'active'>;  // 'pending' | 'active'
+type VisibleStatus = Exclude<Status, 'banned' | 'deleted'>;  // 'pending' | 'active'
+// Extract = keep matching members. Exclude = drop matching members.
+```
+
+`Extract` uses structural assignability as the filter, so you can pass a shape rather than a literal:
+
+```typescript
+type Mixed = string | number | { id: number } | null;
+
+type ObjectsOnly = Extract<Mixed, object>;          // { id: number }
+type Defined      = Exclude<Mixed, null | undefined>; // string | number | { id: number }
+// NonNullable<T> in lib.d.ts is literally defined as Exclude<T, null | undefined>
+```
+
+| Utility | Operates on | Effect |
+| --- | --- | --- |
+| `Pick<T, K>` | Object type | Keep listed keys |
+| `Omit<T, K>` | Object type | Remove listed keys |
+| `Extract<T, U>` | Union type | Keep members assignable to `U` |
+| `Exclude<T, U>` | Union type | Remove members assignable to `U` |
+
 ---
 
 ## 2.2 Generics & Constraints
@@ -1112,32 +1147,115 @@ palette2.red[0];  // ✅ number — TypeScript knows red is number[], not just C
 palette2.green.toUpperCase(); // ✅ string — TypeScript knows green is string
 ```
 
-### Decorators (5.0 — Stage 3)
+### Decorators — Experimental vs Stage 3
 
-Decorators are a meta-programming feature that let you annotate and modify classes and class members. TypeScript 5.0 implemented the TC39 Stage 3 proposal, which has different semantics from the older experimental decorators. They are heavily used in frameworks like NestJS and Angular.
+Decorators are a meta-programming feature that let you annotate and modify classes and class members. There are two incompatible decorator systems in the TypeScript ecosystem and understanding the split is essential because **NestJS and Angular run on the old one**.
+
+#### Experimental decorators (legacy — what NestJS/Angular use)
+
+Enabled via `"experimentalDecorators": true` in tsconfig. This was TypeScript's own pre-standard implementation, stable since TS 4.x, and what every major framework adopted.
+
+The decorator function receives `target`, `propertyKey`, and `descriptor` — raw, loosely-typed arguments that vary by decorator kind:
 
 ```typescript
-// A decorator is a function that receives the class or member it decorates.
-// This decorator wraps a method to log calls to it.
-function logged(target: any, context: ClassMethodDecoratorContext) {
+// Method decorator — experimental style
+function Log(target: any, propertyKey: string, descriptor: PropertyDescriptor) {
+  const original = descriptor.value;
+  descriptor.value = function (...args: any[]) {
+    console.log(`${propertyKey} called with`, args);
+    return original.apply(this, args);
+  };
+  return descriptor;
+}
+
+// Parameter decorator — experimental only, no Stage 3 equivalent
+function Body(target: any, propertyKey: string, parameterIndex: number) {
+  // registers metadata: "parameter 0 of 'create' should be bound from req.body"
+  Reflect.defineMetadata('body-param', parameterIndex, target, propertyKey);
+}
+
+class UserController {
+  @Log
+  create(@Body dto: CreateUserDto) { ... }
+}
+```
+
+**`emitDecoratorMetadata`** is the other half of this system. When enabled alongside `experimentalDecorators`, TypeScript emits type information at runtime — the constructor parameter types, property types, and return types — as `Reflect.metadata` entries. NestJS's dependency injection reads `design:paramtypes` to know what to inject into a constructor *without you ever writing it explicitly*:
+
+```typescript
+// With emitDecoratorMetadata: true, TypeScript emits:
+// Reflect.defineMetadata('design:paramtypes', [UserService], UsersController)
+// NestJS reads this to resolve the injected UserService automatically.
+@Controller('/users')
+class UsersController {
+  constructor(private readonly userService: UserService) {}
+  //                                         ^^^^^^^^^^
+  // NestJS knows this type at runtime via emitted metadata — no manual token needed
+}
+```
+
+This is why every NestJS `tsconfig.json` has both flags set, and why the `reflect-metadata` polyfill must be imported at the app entry point.
+
+#### Stage 3 decorators (TS 5.0+ — the standard)
+
+The TC39 Stage 3 proposal landed in TypeScript 5.0 with no tsconfig flag required. The API is cleaner and more type-safe: instead of three loose arguments, the decorator receives `(target, context)` where `context` is a strongly-typed object describing what is being decorated.
+
+```typescript
+// Method decorator — Stage 3 style
+function logged(target: Function, context: ClassMethodDecoratorContext) {
   const methodName = String(context.name);
   return function (this: any, ...args: any[]) {
     console.log(`Calling ${methodName} with`, args);
-    return target.apply(this, args); // call the original method
+    return target.apply(this, args);
   };
+}
+
+// context.addInitializer() runs code when the class is instantiated
+function bind(_: any, context: ClassMethodDecoratorContext) {
+  context.addInitializer(function (this: any) {
+    this[context.name] = this[context.name].bind(this);
+  });
 }
 
 class Calculator {
   @logged
-  add(a: number, b: number) {
-    return a + b;
-  }
+  add(a: number, b: number) { return a + b; }
 }
-
-new Calculator().add(2, 3);
-// logs: "Calling add with [2, 3]"
-// returns: 5
 ```
+
+Context object shape by decorator kind:
+
+| Kind | Context type | Key fields |
+| --- | --- | --- |
+| Class | `ClassDecoratorContext` | `name`, `addInitializer` |
+| Method | `ClassMethodDecoratorContext` | `name`, `kind`, `static`, `private`, `addInitializer` |
+| Field | `ClassFieldDecoratorContext` | `name`, `static`, `private` |
+| Accessor | `ClassAccessorDecoratorContext` | `name`, `static`, `private`, `access` |
+| Getter/Setter | `ClassGetterDecoratorContext` | `name`, `static`, `private` |
+
+#### The critical difference: parameter decorators are gone
+
+Stage 3 has **no parameter decorators**. This is the fundamental reason NestJS cannot migrate to Stage 3 without a complete rewrite of its DI system — `@Body()`, `@Param()`, `@Query()`, `@Inject()` are all parameter decorators, and they don't exist in the new standard.
+
+Similarly, `emitDecoratorMetadata` is not part of Stage 3. There is no TC39-approved runtime metadata API yet (the [Decorator Metadata proposal](https://github.com/tc39/proposal-decorator-metadata) adds `context.metadata` but it's much more limited than reflect-metadata).
+
+#### Side-by-side comparison
+
+| | Experimental | Stage 3 |
+| --- | --- | --- |
+| **tsconfig flag** | `experimentalDecorators: true` | none (default) |
+| **Parameter decorators** | Yes | No |
+| **Runtime metadata** | `emitDecoratorMetadata` + reflect-metadata | Not supported |
+| **Decorator arguments** | `(target, key, descriptor)` — loosely typed | `(target, context)` — strongly typed |
+| **Used by** | NestJS, Angular, TypeORM, class-validator | New code targeting the standard |
+| **Stability** | Frozen (no longer evolving) | The future standard |
+
+#### What this means in practice
+
+- **In a NestJS project:** you must have `experimentalDecorators: true` and `emitDecoratorMetadata: true`. TypeScript 5.x still supports this; the flags aren't going away. Don't remove them.
+- **In a new library/project not using NestJS/Angular:** prefer Stage 3 decorators — no flag, stronger types, future-proof.
+- **The two systems cannot mix** in the same file — TypeScript will error if `experimentalDecorators` is off and you use a decorator written for the old API.
+- NestJS is exploring a migration path using the [TC39 Decorator Metadata proposal](https://github.com/tc39/proposal-decorator-metadata) and explicit token-based DI as a replacement for `emitDecoratorMetadata`, but as of 2025 the framework still ships with experimental decorators as the default.
 
 ---
 
@@ -1214,46 +1332,127 @@ Understanding the event loop is important not just for avoiding bugs (like the `
 
 ### What It Is
 
-The event loop is a continuous loop that:
-1. Runs all synchronous code to completion (the current "tick")
-2. Drains the **microtask queue** completely (Promises, `queueMicrotask`, `process.nextTick`)
-3. Picks one task from the **macrotask queue** (setTimeout, setInterval, I/O callbacks)
-4. Repeats
+First, the thing the diagram never shows: **synchronous code doesn't go into the event loop at all.** `console.log`, variable assignments, the executor inside `new Promise(...)` — these run directly on the **call stack**, right now, as the interpreter hits each line. The event loop doesn't start picking up queued callbacks until the call stack is completely empty.
+
+```
+┌─────────────────────────────────────────────────────┐
+│  Node loads your file                               │
+│  → call stack runs all sync code top-to-bottom      │  ← console.log lives here
+│  → call stack empties                               │
+└────────────────────────┬────────────────────────────┘
+                         │ only now does the event loop take over
+                         ▼
+          drain nextTick → drain Promise microtasks
+          → timers → poll → check → close → repeat
+```
+
+Once the call stack is empty the event loop is a continuous loop that:
+1. Drains the **microtask queues** completely (`process.nextTick`, then Promises)
+2. Picks one **phase**, runs all its queued callbacks
+3. Drains microtasks again after each callback
+4. Moves to the next phase, repeats
 
 The key insight: **microtasks always run before the next macrotask**. This means Promise callbacks have higher priority than `setTimeout` callbacks, even with a 0ms delay.
 
 ### Node.js Event Loop Phases
 
-Node.js has a more structured event loop than the browser, divided into phases managed by the underlying C library (libuv):
+The browser event loop is simple — one queue for macrotasks, one for microtasks. Node.js is more structured because it has to handle file I/O, network, timers, and signals, each with different urgency. Under the hood it uses a C library called **libuv** that organises async work into **phases**, each with its own queue. The loop visits them in order, processes everything in the current phase's queue, then moves on.
+
+Think of it like a worker who has five separate inboxes and clears them in the same order every round:
 
 ```
-   ┌───────────────────────────┐
-┌─>│           timers          │  setTimeout, setInterval callbacks run here
-│  └─────────────┬─────────────┘
-│  ┌─────────────┴─────────────┐
-│  │     pending callbacks     │  I/O error callbacks from the previous iteration
-│  └─────────────┬─────────────┘
-│  ┌─────────────┴─────────────┐
-│  │           poll            │  retrieve new I/O events; execute their callbacks
-│  └─────────────┬─────────────┘
-│  ┌─────────────┴─────────────┐
-│  │           check           │  setImmediate callbacks run here (after poll)
-│  └─────────────┬─────────────┘
-│  ┌─────────────┴─────────────┐
-│  │      close callbacks      │  e.g. socket.on('close', ...)
-│  └───────────────────────────┘
-└────────────────────────────────
+   ┌─────────────────────┐
+┌─>│  1. timers          │  "Is it time to run any setTimeout / setInterval?"
+│  ├─────────────────────┤
+│  │  2. pending I/O     │  "Any error callbacks left over from last round?"
+│  ├─────────────────────┤
+│  │  3. poll            │  "Any new I/O results ready? (file reads, network…)"
+│  │                     │   ← Node spends most of its idle time waiting HERE
+│  ├─────────────────────┤
+│  │  4. check           │  "Any setImmediate callbacks?"
+│  ├─────────────────────┤
+│  │  5. close           │  "Any sockets / handles being closed?"
+│  └─────────────────────┘
+└── (start over)
 
-Between EVERY phase transition — and after each individual callback:
-  1. process.nextTick() queue (highest priority — runs before anything else)
-  2. Promise microtask queue
+⚡ Between every phase — and after every single callback — Node fully drains:
+     1. process.nextTick() queue
+     2. Promise microtask queue
+   …before moving on. Microtasks are not a phase; they're a checkpoint.
 ```
+
+**What each phase actually does:**
+
+**Timers** — checks the system clock. Any `setTimeout` or `setInterval` whose delay has elapsed gets its callback queued here. Note: `setTimeout(fn, 0)` doesn't mean "immediately" — it means "as soon as the timers phase runs next, if at least 0ms have passed". In practice that's at least 1ms.
+
+**Pending callbacks** — handles a small set of system-level error callbacks that were deferred from the previous loop iteration (e.g., TCP errors on some platforms). You almost never interact with this directly.
+
+**Poll** — the heart of the loop. This is where Node asks the OS: "does anything have data ready?" (finished file reads, incoming HTTP requests, resolved DNS lookups, etc.). If there's work to do, it runs those I/O callbacks right here. If there's nothing ready *and* no timers are scheduled, Node **blocks** here — it sits and waits rather than spinning — which is why a Node process doesn't burn CPU while idle.
+
+**Check** — runs `setImmediate` callbacks. This phase exists specifically to give you a way to say "run this after the current I/O phase, but before any timers". That's what makes it different from `setTimeout(fn, 0)`.
+
+**Close callbacks** — cleanup: `socket.destroy()`, `stream.close()`, etc.
+
+### Microtask and Macrotask Reference
+
+**Microtasks** — drain completely after every callback, before the next phase:
+
+| API | Where | Notes |
+| --- | --- | --- |
+| `process.nextTick(fn)` | Node only | Its own queue — drains *before* Promise microtasks |
+| `Promise.then/catch/finally` | Node + browser | Any settled Promise callback |
+| `async/await` continuation | Node + browser | Every resume point after an `await` |
+| `queueMicrotask(fn)` | Node + browser | Explicit microtask scheduling, same queue as Promises |
+| `MutationObserver` callback | Browser only | DOM mutation notifications |
+
+`process.nextTick` is often called a microtask but it has its own separate queue that Node always drains first. True priority: **nextTick → Promise microtasks → next macrotask**.
+
+**Macrotasks** — one per loop iteration (then microtasks drain before the next one):
+
+| API | Phase (Node) | Notes |
+| --- | --- | --- |
+| `setTimeout(fn, delay)` | timers | Minimum delay, not guaranteed exact |
+| `setInterval(fn, delay)` | timers | Repeating; same phase as setTimeout |
+| `setImmediate(fn)` | check (Node only) | After poll, before next timers phase |
+| I/O callbacks | poll | File reads, network, DNS lookups |
+| `MessageChannel.postMessage` | Browser only | Cross-frame / worker messaging |
+| `requestAnimationFrame(fn)` | Browser only | Tied to display refresh rate (~16ms) |
+| `requestIdleCallback(fn)` | Browser only | Lowest priority — runs when browser is idle |
+| Initial script execution | — | The very first "task" before any loop iteration |
 
 **Priority order (highest to lowest):**
 1. `process.nextTick()` — runs before any other async callback, even other microtasks
 2. Promise microtasks (`.then`, `.catch`, `await` continuations)
-3. `setImmediate` — runs in the "check" phase, after I/O poll
-4. `setTimeout(fn, 0)` — runs in the "timers" phase on the next loop iteration
+3. `setImmediate` — runs in the check phase, after poll
+4. `setTimeout(fn, 0)` — runs in the timers phase on the next loop iteration
+
+**`setImmediate` vs `setTimeout(fn, 0)` — the tricky one:**
+
+At the top level of a script, their order is non-deterministic (depends on OS scheduling). But **inside an I/O callback**, `setImmediate` always wins — because the I/O callback ran during the poll phase, and check comes before timers in the next iteration:
+
+```javascript
+const fs = require('fs');
+
+fs.readFile(__filename, () => {
+  // We're now inside the poll phase.
+  // After this callback, Node moves to check before going back to timers.
+
+  setTimeout(() => console.log('setTimeout'), 0);
+  setImmediate(() => console.log('setImmediate'));
+
+  // Output is always: setImmediate, setTimeout
+  // because check (setImmediate) comes before timers (setTimeout) in the loop order.
+});
+```
+
+Outside an I/O callback (e.g., at the top of your script), you can't rely on the order:
+
+```javascript
+// At the top level — order is NOT guaranteed
+setTimeout(() => console.log('setTimeout'), 0);
+setImmediate(() => console.log('setImmediate'));
+// Could be either order depending on how long the setup took
+```
 
 ```javascript
 // Classic execution order question:
@@ -1271,6 +1470,164 @@ console.log('5');                          // sync — runs immediately
 // Sync runs first (1, 5), then nextTick (4), then Promise microtask (3),
 // then macrotask (2)
 ```
+
+### The Promise Constructor
+
+`Promise.resolve().then(...)` is the shortest way to schedule a microtask but it hides how Promises actually work in real code. Here's what happens when you construct a Promise yourself:
+
+```javascript
+console.log('1 - start');
+
+const p = new Promise((resolve, reject) => {
+  // The executor function runs SYNCHRONOUSLY — right now, inline.
+  console.log('2 - inside Promise constructor');
+
+  resolve('done');
+
+  // resolve() doesn't stop execution — it just marks the promise as settled
+  // and schedules any .then() callbacks as microtasks.
+  console.log('3 - after resolve()');
+});
+
+p.then(val => {
+  // This runs as a microtask — after all sync code finishes.
+  console.log('4 - .then got:', val);
+});
+
+console.log('5 - end of sync code');
+
+// Output: 1, 2, 3, 5, 4
+```
+
+The key points:
+- The callback you pass to `new Promise(...)` runs immediately and synchronously
+- `resolve()` doesn't pause or exit the constructor — it just enqueues the `.then` callbacks
+- `.then` callbacks only run after the current synchronous code finishes
+
+What about doing async work *inside* the constructor — like a `setTimeout` before resolving?
+
+```javascript
+console.log('1');
+
+const p = new Promise((resolve) => {
+  console.log('2 - constructor runs sync');
+  setTimeout(() => {
+    // This fires as a macrotask later — only then does the promise settle
+    console.log('3 - inside setTimeout, about to resolve');
+    resolve('ready');
+  }, 0);
+});
+
+p.then(val => console.log('4 - .then got:', val)); // won't run until resolve() is called
+
+console.log('5');
+
+// Output: 1, 2, 5, 3, 4
+// The .then fires only after the setTimeout callback calls resolve() —
+// so it runs right after the setTimeout, as a microtask within that macrotask tick.
+```
+
+### async/await Under the Hood
+
+`async/await` is syntactic sugar over Promises. An `async` function always returns a Promise; every `await` suspends the function and resumes it as a microtask when the awaited value settles.
+
+```javascript
+// This:
+async function greet() {
+  console.log('B - inside async fn');
+  const result = await Promise.resolve('hello');
+  console.log('D - after await:', result); // scheduled as microtask
+}
+
+// Is roughly equivalent to:
+function greet() {
+  console.log('B - inside async fn');
+  return Promise.resolve('hello').then(result => {
+    console.log('D - after await:', result);
+  });
+}
+```
+
+Seeing the desugared version makes the execution order obvious:
+
+```javascript
+console.log('A');
+
+greet(); // starts the async fn, which runs sync until the first await, then suspends
+
+console.log('C'); // this runs before 'D' because greet() suspended at the await
+
+// Output: A, B, C, D
+```
+
+Each `await` is a suspension point — code after it becomes a microtask callback:
+
+```javascript
+async function multi() {
+  console.log('B');
+  await null;          // suspend — resume as microtask
+  console.log('D');
+  await null;          // suspend again — resume as another microtask
+  console.log('F');
+}
+
+console.log('A');
+multi();
+console.log('C');
+
+// Output: A, B, C, D, F
+// C runs before D because multi() suspended at the first await.
+// D runs before F for the same reason.
+```
+
+### async/await with Macrotasks
+
+When you `await` something that resolves after a macrotask (like a `setTimeout`), the code after the `await` doesn't resume until that macrotask fires:
+
+```javascript
+async function run() {
+  console.log('B - async fn starts');
+
+  // wrapping setTimeout in a Promise so we can await it
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  // this line only runs once the setTimeout fires AND the microtask resolves
+  console.log('D - resumed after setTimeout');
+}
+
+console.log('A');
+run();
+console.log('C');
+setTimeout(() => console.log('E - plain setTimeout'), 0);
+
+// Output: A, B, C, D, E
+//
+// Why D before E?
+// Both setTimeouts were registered at roughly the same time.
+// When the first one fires (the one inside run()), it calls resolve(),
+// which schedules 'D' as a microtask. Microtasks drain before the next
+// macrotask, so D runs before E's setTimeout callback gets a turn.
+```
+
+### Microtask Queue Draining
+
+The event loop drains the entire microtask queue before moving to the next macrotask. This means chained `.then()` calls all run before any `setTimeout`:
+
+```javascript
+setTimeout(() => console.log('setTimeout'), 0);
+
+Promise.resolve()
+  .then(() => { console.log('microtask 1'); })
+  .then(() => { console.log('microtask 2'); })  // queued by microtask 1
+  .then(() => { console.log('microtask 3'); }); // queued by microtask 2
+
+// Output: microtask 1, microtask 2, microtask 3, setTimeout
+//
+// Each .then() enqueues the next one as a microtask,
+// and the queue keeps draining before the macrotask gets a turn.
+```
+
+**Starvation warning:** if your microtasks keep scheduling more microtasks indefinitely, `setTimeout` and I/O callbacks never run. In practice this is rare, but it's worth knowing that a tight `Promise` loop can starve macrotasks.
 
 ---
 
@@ -1416,41 +1773,58 @@ Event-Driven Architecture (EDA) decouples services through events. Service A emi
 
 The simplest EDA pattern. The event just announces that something happened — it carries minimal data (typically just an ID). Subscribers query for more details if they need them.
 
+Node.js doesn't have a global `eventBus` object — you create one using the built-in `EventEmitter` and share it as a module-level singleton:
+
 ```typescript
-// Producer: knows nothing about who consumes the event or what they do
+// eventBus.ts — create once, import everywhere
+import { EventEmitter } from 'events';
+
+export const eventBus = new EventEmitter();
+// Optional: raise the default listener limit if you have many subscribers
+eventBus.setMaxListeners(50);
+```
+
+```typescript
+// userService.ts
+import { eventBus } from './eventBus';
+
 class UserService {
   async createUser(data: CreateUserDto) {
     const user = await this.db.users.create(data);
     // Emit a lightweight notification — just the ID
-    this.eventBus.emit('user.created', { userId: user.id });
+    eventBus.emit('user.created', { userId: user.id });
     return user;
   }
 }
+```
 
-// Consumer 1: decides independently to send a welcome email
+```typescript
+// emailHandler.ts — registers independently, UserService doesn't know it exists
+import { eventBus } from './eventBus';
+
 eventBus.on('user.created', async ({ userId }) => {
-  const user = await userService.findById(userId); // fetches details it needs
+  const user = await userService.findById(userId);
   await emailService.sendWelcome(user.email);
 });
 
-// Consumer 2: decides independently to track the signup
+// analyticsHandler.ts
 eventBus.on('user.created', async ({ userId }) => {
   await analyticsService.trackSignup(userId);
 });
-
-// Adding a new consumer (e.g. Slack notification) requires zero changes to UserService
+// Adding a new subscriber requires zero changes to UserService
 ```
 
 ### Event-Carried State Transfer
 
-A variation where the event carries all the data consumers need, so they don't have to query back to the producer. This trades larger event payloads for fewer inter-service queries — useful when consumers need multiple fields and querying them individually would create tight coupling or performance issues.
+A variation where the event carries all the data consumers need, so they don't have to query back to the producer. This trades larger event payloads for fewer inter-service queries.
 
 ```typescript
+import { eventBus } from './eventBus';
+
 class UserService {
   async createUser(data: CreateUserDto) {
     const user = await this.db.users.create(data);
-    // Event carries the full snapshot of the created user
-    this.eventBus.emit('user.created', {
+    eventBus.emit('user.created', {
       userId: user.id,
       email: user.email,
       name: user.name,
@@ -1460,12 +1834,71 @@ class UserService {
   }
 }
 
-// Consumer doesn't need to call UserService at all — data is in the event
+// Consumer doesn't need to call UserService — everything is in the event
 eventBus.on('user.created', async (userData) => {
   await emailService.sendWelcome(userData.email, userData.name);
-  // No extra network call — everything needed is already in the event payload
 });
 ```
+
+### Native EventEmitter vs Libraries vs Message Brokers
+
+Not every event-driven problem needs the same tool. The right choice depends on whether your events stay inside one process or need to cross service/machine boundaries.
+
+**Node's built-in `EventEmitter`** — zero dependencies, synchronous by default (listeners run in the order they were registered, in the same call stack). Good for in-process communication within a single Node app.
+
+Limitations to know:
+- Listeners are synchronous unless you explicitly make them async — an unhandled error in one listener can crash the emitter
+- No persistence, no replay — if a service restarts, all pending events are lost
+- No delivery guarantees across processes or machines
+
+**Libraries (`EventEmitter2`, `mitt`)** — add wildcards (`order.*`), namespaces, and better TypeScript support over the native API. Worth adding when you need pattern-based subscriptions or are building a framework-level bus.
+
+```typescript
+import EventEmitter2 from 'eventemitter2';
+
+const eventBus = new EventEmitter2({ wildcard: true });
+
+eventBus.on('order.*', (event) => {
+  // catches order.created, order.cancelled, order.shipped, ...
+});
+```
+
+**Message brokers (RabbitMQ, Kafka, SQS)** — the right choice when events need to cross service boundaries, survive restarts, or be consumed by services running on different machines. This is no longer in-process communication — it's distributed messaging (covered in depth in §21).
+
+|                    | `EventEmitter`        | Library (mitt/EE2)     | Message broker               |
+| ------------------ | --------------------- | ---------------------- | ---------------------------- |
+| Scope              | Single process        | Single process         | Across services/machines     |
+| Persistence        | No                    | No                     | Yes                          |
+| Delivery guarantee | At-most-once          | At-most-once           | At-least-once / exactly-once |
+| Replay             | No                    | No                     | Yes (Kafka)                  |
+| Complexity         | None                  | Low                    | High                         |
+| Use when           | In-process decoupling | Same + wildcards/types | Distributed systems          |
+
+### Inter-Service Events: the E-commerce Example
+
+A common interview scenario: you have four microservices that need to react to each other's state changes without calling each other directly. RabbitMQ acts as the broker — each service publishes to an exchange and subscribes to queues independently.
+
+```
+Order Service  ──[order.created]──►  RabbitMQ exchange
+                                          │
+                        ┌─────────────────┼─────────────────┐
+                        ▼                 ▼                  ▼
+               Inventory Service   Payment Service   Notification Service
+               (reserves stock)   (waits for       (sends "order received"
+                    │              inventory.reserved)       email)
+                    │                     │
+               [inventory.reserved]  [payment.completed]
+                    │                     │
+                    └──► Payment Svc      └──► Notification Svc
+```
+
+The key properties this architecture gives you:
+- **Order Service has no imports from Inventory, Payment, or Notification** — it just fires an event and moves on
+- **Each service can be deployed, scaled, and restarted independently** — RabbitMQ holds messages while a service is down
+- **Adding a new service** (e.g. analytics) means subscribing to existing events with no changes to any other service
+- **If Payment Service is slow**, it doesn't block Order Service — messages queue up and drain when capacity returns
+
+The tradeoff: you now have **eventual consistency** rather than a synchronous transaction. The order is "placed" before inventory is confirmed. This is generally acceptable (and expected) in e-commerce, but requires compensating transactions (cancel the reservation if payment fails) — which is the Saga pattern covered in §34.
 
 ### CQRS (Command Query Responsibility Segregation)
 
@@ -1515,6 +1948,10 @@ class AccountBalanceProjection {
 | Retry with exponential backoff | **Deep** | Production async pattern |
 | `AbortController` | **Learn** | Increasingly expected in modern code |
 | Event-Driven Architecture (notification vs state transfer) | **Important** | Architecture design questions |
+| Native EventEmitter — singleton pattern, async listener caveats | **Important** | Frequently misunderstood in Node |
+| EventEmitter vs library vs message broker — when to use each | **Deep** | Design decision interviews |
+| Inter-service events with RabbitMQ (Saga flow) | **Important** | Distributed systems / microservices questions |
+| NestJS @nestjs/event-emitter — @OnEvent, emitAsync | **Important** | NestJS-specific |
 | CQRS | **Important** | System design and NestJS context |
 
 ---

@@ -500,7 +500,6 @@ describe("POST /users", () => {
 ```
 
 ## 16.3 NestJS
-
 NestJS brings inversion of control to Node.js. It wraps Express (or Fastify) and adds a module system, a dependency injection container, and four lifecycle hooks that handle cross-cutting concerns before and after your route handlers run. The DI container means you declare dependencies as constructor parameters and the framework resolves and injects them — this makes unit testing clean because you can inject mocks without touching the actual module. Understanding the request lifecycle order is the core interview question: **Middleware → Guard → Interceptor (in) → Pipe → Controller → Interceptor (out) → Exception Filter**. Guards handle authorization (return true/false); Pipes transform or validate input; Interceptors can mutate the request *and* response; Filters catch exceptions and shape error responses.
 
 ### Architecture
@@ -695,65 +694,137 @@ app.useGlobalFilters(new HttpExceptionFilter());
 
 ### Microservices
 
-NestJS's `@nestjs/microservices` package lets you run NestJS apps as microservices that communicate over a transport (TCP, Redis pub/sub, RabbitMQ, Kafka, gRPC, NATS) rather than HTTP. A microservice app listens for messages using `@MessagePattern` handlers — structurally identical to HTTP controllers but transport-agnostic. An API gateway (itself a NestJS HTTP app) calls downstream services via `ClientProxy.send()` (request-response) or `.emit()` (fire-and-forget). You can switch transports by changing a configuration option without touching business logic, and the same DI, guards, and interceptors work across HTTP and microservice contexts.
+NestJS's `@nestjs/microservices` package lets a NestJS app communicate over a message transport (TCP, Redis, RabbitMQ, Kafka, gRPC, NATS, MQTT) rather than HTTP. The same DI, guards, interceptors, and pipes work across HTTP and microservice contexts — only the transport and decorators change.
+
+**Two communication patterns:**
+
+| Pattern | Decorator | Client method | Semantics |
+|---|---|---|---|
+| Request/Response | `@MessagePattern` | `client.send()` | Returns Observable (cold); caller awaits a reply |
+| Fire-and-forget | `@EventPattern` | `client.emit()` | No reply; Observable completes immediately |
+
+#### Bootstrap — standalone microservice
 
 ```typescript
-// main.ts (microservice)
-import { NestFactory } from "@nestjs/core";
-import { MicroserviceOptions, Transport } from "@nestjs/microservices";
-import { AppModule } from "./app.module";
-
-async function bootstrap() {
-  const app = await NestFactory.createMicroservice<MicroserviceOptions>(
-    AppModule,
-    {
-      transport: Transport.REDIS,
-      options: {
-        host: "localhost",
-        port: 6379,
-      },
+// main.ts
+const app = await NestFactory.createMicroservice<MicroserviceOptions>(
+  AppModule,
+  {
+    transport: Transport.RMQ,
+    options: {
+      urls: ['amqp://localhost:5672'],
+      queue: 'orders_queue',
+      queueOptions: { durable: true },
+      noAck: false,       // manual ack
+      prefetchCount: 1,
     },
-  );
+  },
+);
+await app.listen();
+```
 
-  await app.listen();
-}
+#### Handlers
 
-// user.controller.ts (microservice)
-import { Controller } from "@nestjs/common";
-import { MessagePattern } from "@nestjs/microservices";
+```typescript
+import { Controller } from '@nestjs/common';
+import {
+  MessagePattern, EventPattern,
+  Payload, Ctx, RmqContext,
+} from '@nestjs/microservices';
 
 @Controller()
-export class UserController {
-  @MessagePattern({ cmd: "get_user" })
-  getUser(data: { id: number }) {
-    return { id: data.id, name: "Alice" };
-  }
-}
-
-// API Gateway (calls microservice)
-import { Injectable } from "@nestjs/common";
-import {
-  ClientProxy,
-  ClientProxyFactory,
-  Transport,
-} from "@nestjs/microservices";
-
-@Injectable()
-export class UserService {
-  private client: ClientProxy;
-
-  constructor() {
-    this.client = ClientProxyFactory.create({
-      transport: Transport.REDIS,
-      options: { host: "localhost", port: 6379 },
-    });
+export class OrdersController {
+  // Request/response — return value is sent back to caller
+  @MessagePattern({ cmd: 'get_order' })
+  getOrder(@Payload() data: { id: number }) {
+    return { id: data.id, status: 'pending' };
   }
 
-  async getUser(id: number) {
-    return this.client.send({ cmd: "get_user" }, { id }).toPromise();
+  // Fire-and-forget — return value ignored
+  @EventPattern('order.placed')
+  handleOrderPlaced(@Payload() data: Record<string, unknown>): void {
+    // side-effects only — notify inventory, send email, etc.
+  }
+
+  // Manual ack (when noAck: false)
+  @EventPattern('order.shipped')
+  handleShipped(@Payload() data: unknown, @Ctx() ctx: RmqContext): void {
+    const channel = ctx.getChannelRef();
+    channel.ack(ctx.getMessage());
   }
 }
 ```
+
+#### ClientProxy via DI (preferred over `ClientProxyFactory.create`)
+
+Register the client in the module, inject by token:
+
+```typescript
+// app.module.ts
+@Module({
+  imports: [
+    ClientsModule.registerAsync([
+      {
+        name: 'ORDERS_SERVICE',
+        imports: [ConfigModule],
+        useFactory: (cfg: ConfigService) => ({
+          transport: Transport.RMQ,
+          options: {
+            urls: [cfg.get<string>('RABBITMQ_URL')],
+            queue: 'orders_queue',
+            queueOptions: { durable: true },
+          },
+        }),
+        inject: [ConfigService],
+      },
+    ]),
+  ],
+})
+export class AppModule {}
+
+// gateway.service.ts
+@Injectable()
+export class GatewayService {
+  constructor(
+    @Inject('ORDERS_SERVICE') private readonly client: ClientProxy,
+  ) {}
+
+  getOrder(id: number) {
+    // send() is cold Observable — must subscribe or use firstValueFrom
+    return firstValueFrom(
+      this.client.send<Order>({ cmd: 'get_order' }, { id }),
+    );
+  }
+
+  placeOrder(dto: CreateOrderDto) {
+    this.client.emit('order.placed', dto);   // fire-and-forget
+  }
+}
+```
+
+#### Hybrid app — HTTP + microservice in one process
+
+```typescript
+// main.ts
+const app = await NestFactory.create(AppModule);
+
+app.connectMicroservice<MicroserviceOptions>({
+  transport: Transport.RMQ,
+  options: {
+    urls: ['amqp://localhost:5672'],
+    queue: 'orders_queue',
+    queueOptions: { durable: false },
+    noAck: true,
+  },
+});
+
+await app.startAllMicroservices();   // must precede app.listen()
+await app.listen(3000);
+```
+
+Both `@Get`/`@Post` controllers and `@MessagePattern`/`@EventPattern` handlers live in the same `AppModule`. Useful during migration from monolith, or for an API gateway that also consumes events.
+
+**When to use NestJS microservices vs Lambda:** Lambda is stateless and ephemeral — it cannot hold a persistent queue consumer. Use NestJS microservices when you need a long-running consumer (RabbitMQ, Kafka). Use Lambda when events arrive via AWS services (SQS, SNS, EventBridge) that invoke the function per message.
 
 **Supported transports:** TCP, Redis, NATS, RabbitMQ, Kafka, gRPC, MQTT.
 
@@ -1010,6 +1081,97 @@ it("persists user and retrieves by ID", async () => {
 });
 ```
 
+### Events: @nestjs/event-emitter
+
+NestJS wraps `EventEmitter2` behind its own decorator-based API via the `@nestjs/event-emitter` package. This keeps event handling inside the NestJS DI container — handlers are injectable services with full access to repositories, config, and other providers.
+
+```typescript
+// app.module.ts — register once at the root
+import { EventEmitterModule } from '@nestjs/event-emitter';
+
+@Module({
+  imports: [
+    EventEmitterModule.forRoot({
+      wildcard: true,   // enables 'order.*' patterns
+      delimiter: '.',   // namespace separator
+      maxListeners: 20,
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+```typescript
+// order-created.event.ts — typed event class (better than plain objects)
+export class OrderCreatedEvent {
+  constructor(
+    public readonly orderId: string,
+    public readonly userId: string,
+    public readonly total: number,
+  ) {}
+}
+```
+
+```typescript
+// orders.service.ts — emitting
+import { EventEmitter2 } from '@nestjs/event-emitter';
+
+@Injectable()
+export class OrdersService {
+  constructor(
+    private readonly ordersRepo: OrdersRepository,
+    private readonly eventEmitter: EventEmitter2,
+  ) {}
+
+  async createOrder(dto: CreateOrderDto) {
+    const order = await this.ordersRepo.save(dto);
+
+    // emitAsync waits for all async listeners to complete before returning
+    await this.eventEmitter.emitAsync(
+      'order.created',
+      new OrderCreatedEvent(order.id, order.userId, order.total),
+    );
+
+    return order;
+  }
+}
+```
+
+```typescript
+// notification.listener.ts — subscribing with @OnEvent
+import { OnEvent } from '@nestjs/event-emitter';
+
+@Injectable()
+export class NotificationListener {
+  constructor(private readonly emailService: EmailService) {}
+
+  @OnEvent('order.created')
+  async handleOrderCreated(event: OrderCreatedEvent) {
+    await this.emailService.sendOrderConfirmation(event.userId, event.orderId);
+  }
+
+  @OnEvent('order.*')  // wildcard: fires for any order.X event
+  async handleAnyOrderEvent(event: OrderCreatedEvent) {
+    console.log('Order event:', event);
+  }
+
+  @OnEvent('payment.failed', { async: true })  // won't block the emitter
+  async handlePaymentFailed(event: PaymentFailedEvent) {
+    await this.emailService.sendPaymentFailedNotification(event.userId);
+  }
+}
+
+// Register the listener as a provider in its module
+@Module({
+  providers: [NotificationListener, EmailService],
+})
+export class NotificationModule {}
+```
+
+**`emit` vs `emitAsync`:** `emit` fires all listeners and returns immediately — a throwing listener propagates synchronously. `emitAsync` returns a Promise that resolves when all async listeners complete. Use `emitAsync` by default in NestJS services.
+
+**Scope:** this is in-process only. For cross-service communication across pods or machines, use the NestJS Microservices module with RabbitMQ or Kafka (§21).
+
 ## Backend Priority Summary
 
 | Topic                                          | Priority      |
@@ -1029,10 +1191,14 @@ it("persists user and retrieves by ID", async () => {
 | **NestJS**                                     |               |
 | Modules/Controllers/Providers/DI               | **Refresh**   |
 | Guards/Interceptors/Pipes/Filters              | **Refresh**   |
-| Microservices (TCP, Redis, Kafka, gRPC)        | **Important** |
+| Microservices — @MessagePattern vs @EventPattern | **Important** |
+| ClientsModule.register + ClientProxy DI        | **Important** |
+| RabbitMQ transport config + manual ack         | **Deep**      |
+| Hybrid app (HTTP + microservice in one process)| **Learn**     |
 | CQRS module                                    | **Learn**     |
 | OpenAPI/Swagger                                | **Know**      |
 | Testing (@nestjs/testing)                      | **Deep**      |
+| @nestjs/event-emitter — @OnEvent, emitAsync    | **Important** |
 
 ---
 

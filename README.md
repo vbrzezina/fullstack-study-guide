@@ -196,6 +196,7 @@
     - [34.5 Distributed Locking](./08_SolutionArchitecture_34-36.md#345-distributed-locking)
     - [34.6 Consistent Hashing](./08_SolutionArchitecture_34-36.md#346-consistent-hashing)
     - [34.7 Cache Strategies](./08_SolutionArchitecture_34-36.md#347-cache-strategies)
+    - [34.8 Microservice Architecture](./08_SolutionArchitecture_34-36.md#348-microservice-architecture)
 35. [System Design](./08_SolutionArchitecture_34-36.md#35-system-design) — 20 min
     - [35.1 Method](./08_SolutionArchitecture_34-36.md#351-method)
     - [35.2 Practice Problems](./08_SolutionArchitecture_34-36.md#352-practice-problems)
