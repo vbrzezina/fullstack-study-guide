@@ -137,8 +137,14 @@
     - [26.2 SLI / SLO / SLA](./05_Observability_Security_26-27.md#262-sli--slo--sla)
     - [26.3 Alerting](./05_Observability_Security_26-27.md#263-alerting)
     - [26.4 APM and Observability Tooling](./05_Observability_Security_26-27.md#264-apm-and-observability-tooling)
-27. [Application Security](./05_Observability_Security_26-27.md#27-application-security) — 15 min
+27. [Application Security](./05_Observability_Security_26-27.md#27-application-security) — 25 min
     - [27.1 Security Testing Types](./05_Observability_Security_26-27.md#271-security-testing-types)
+      - [SAST — SonarQube / SonarCloud](./05_Observability_Security_26-27.md#sonarqube--sonarcloud)
+      - [SAST — CodeQL](./05_Observability_Security_26-27.md#codeql)
+      - [SAST — Semgrep](./05_Observability_Security_26-27.md#semgrep)
+      - [SCA — Snyk](./05_Observability_Security_26-27.md#snyk)
+      - [SCA — Trivy](./05_Observability_Security_26-27.md#trivy)
+      - [DAST — OWASP ZAP](./05_Observability_Security_26-27.md#dast-dynamic-application-security-testing)
     - [27.2 OWASP Top 10](./05_Observability_Security_26-27.md#272-owasp-top-10)
     - [27.3 Security Headers](./05_Observability_Security_26-27.md#273-security-headers)
 28. [Cloud & Serverless](./06_Cloud_DataEng_28-30.md#28-cloud--serverless) — 8 min
@@ -168,7 +174,7 @@
     - [31.2 Testing Strategy & Culture](./07_WaysOfWorking_31-33.md#312-testing-strategy--culture)
     - [31.3 Delivery Metrics (DORA)](./07_WaysOfWorking_31-33.md#313-delivery-metrics-dora)
     - [31.4 Reliability & Incident Management](./07_WaysOfWorking_31-33.md#314-reliability--incident-management)
-    - [31.5 Behavioral Interviews & STAR](./07_WaysOfWorking_31-33.md#315-behavioral-interviews--star)
+    - [31.5 Behavioral Interviews & STAR](./10_Leadership_38.md#386-behavioral-interviews--star)
     - [31.6 Feature Flags](./07_WaysOfWorking_31-33.md#316-feature-flags)
 32. [Agile & Delivery](./07_WaysOfWorking_31-33.md#32-agile--delivery) — 12 min
     - [32.1 Agile Foundations](./07_WaysOfWorking_31-33.md#321-agile-foundations)
@@ -200,6 +206,20 @@
     - [36.3 Designing Systems & Decision-Making](./08_SolutionArchitecture_34-36.md#363-designing-systems--decision-making)
     - [36.4 RACI & Stakeholder Alignment](./08_SolutionArchitecture_34-36.md#364-raci--stakeholder-alignment)
     - [36.5 Architecture Principles](./08_SolutionArchitecture_34-36.md#365-architecture-principles)
+37. [Generative AI & Prompt Engineering](./09_GenAI_37.md#37-generative-ai--prompt-engineering) — 30 min
+    - [37.1 LLM Fundamentals](./09_GenAI_37.md#371-llm-fundamentals)
+    - [37.2 Prompting Techniques](./09_GenAI_37.md#372-prompting-techniques)
+    - [37.3 Retrieval-Augmented Generation (RAG)](./09_GenAI_37.md#373-retrieval-augmented-generation-rag)
+    - [37.4 Tool Use & Agentic Patterns](./09_GenAI_37.md#374-tool-use--agentic-patterns)
+    - [37.5 Production Considerations](./09_GenAI_37.md#375-production-considerations)
+    - [37.6 Claude & Claude Code](./09_GenAI_37.md#376-claude--claude-code)
+38. [Engineering Leadership & Soft Skills](./10_Leadership_38.md#38-engineering-leadership--soft-skills) — 20 min
+    - [38.1 Technical Leadership](./10_Leadership_38.md#381-technical-leadership)
+    - [38.2 Mentoring & Developing Others](./10_Leadership_38.md#382-mentoring--developing-others)
+    - [38.3 Giving & Receiving Feedback](./10_Leadership_38.md#383-giving--receiving-feedback)
+    - [38.4 Stakeholder Communication & Presenting](./10_Leadership_38.md#384-stakeholder-communication--presenting)
+    - [38.5 Meeting Facilitation](./10_Leadership_38.md#385-meeting-facilitation)
+    - [38.6 Behavioral Interviews & STAR](./10_Leadership_38.md#386-behavioral-interviews--star)
 
 ---
 
@@ -269,7 +289,7 @@ Designed for a senior engineer (9+ years) who needs focused interview preparatio
 - **Day 3: Messaging (§21)** — queue vs streaming (consume-and-delete vs durable log); Kafka partitions/consumer groups/offsets/compaction; Rabbit vs Kafka vs Kinesis vs SQS/SNS vs EventBridge; DLQs, redrive, outbox.
 - **Day 4: DevOps + Cloud/Serverless (§24, §28, §29)** — Docker multi-stage build; K8s Pod/Deployment/Service/ConfigMap/HPA; CI/CD (GitHub Actions *and* `.gitlab-ci.yml`); IaC CDK vs Terraform vs CloudFormation; serverless scale-to-zero/cold starts (§28); AWS core services — Lambda, API Gateway, S3, DynamoDB, SQS/SNS, EventBridge, Step Functions (§29).
 - **Day 5: Observability + Security (§26, §27)** — structured logging + correlation IDs; RED metrics; OpenTelemetry tracing; OWASP Top 10 (SQLi, XSS, CSRF, SSRF, broken auth) + fixes; JWT pitfalls (`alg:none`).
-- **Day 6: Solution Architecture (§36) + System Design Practice (§35)** — quality attributes/NFRs (the -ilities); the key trade-offs (availability vs consistency, scalability vs simplicity); ranking attributes by business priority; then design 1 system (URL shortener or rate limiter): requirements → capacity → components → data model → bottlenecks.
+- **Day 6: Solution Architecture (§36) + Generative AI (§37) + System Design Practice (§35)** — quality attributes/NFRs (the -ilities); the key trade-offs (availability vs consistency, scalability vs simplicity); ranking attributes by business priority; LLM fundamentals (tokens, context, temperature), prompting techniques (CoT, few-shot, structured output), RAG pipeline (embeddings, vector DB, chunking), tool use & agentic patterns (ReAct), production concerns (evals, prompt caching, observability); then design 1 system (URL shortener or rate limiter): requirements → capacity → components → data model → bottlenecks.
 - **Day 7: System Design Practice (§35)** — design a 2nd system (notification service); practice stating NFR trade-offs aloud and recording the decision as an ADR (§33.2).
 
 **Deliverables:** ✅ SOLID w/ 5 examples ✅ 2 system designs end-to-end (with explicit NFR trade-offs) ✅ Docker multi-stage + K8s Deployment from memory.
@@ -281,7 +301,7 @@ Designed for a senior engineer (9+ years) who needs focused interview preparatio
 - **Day 1–2: DSA Core Patterns (§22)** — two pointers (3), sliding window (3), BFS/DFS trees (3), binary search (2), hash maps (2). Pattern recognition, not memorization.
 - **Day 3: DSA Advanced** — 1D DP (coin change, climbing stairs, house robber); linked list (reverse, cycle, merge); heap / top-K.
 - **Day 4: System Design Deep Dive** — review §35 framework; design 1 read-heavy + 1 write-heavy system; capacity estimation, trade-offs, failure modes.
-- **Day 5: Ways of Working + Behavioral (§25, §31, §32, §33)** — Git: branching strategies (TBD vs GitFlow vs GitHub Flow), conventional commits + semantic-release, PR best practices (§25); Engineering Excellence (code review, test pyramid, DORA metrics, blameless postmortems/incident lifecycle, behavioral interviews & STAR framework §31.5); Agile (Scrum vs Kanban, refinement vs planning, story points = relative effort); Documentation (ADRs — context + rejected alternatives, RFC vs ADR). Write 5 STAR stories using the §31.5 themes; prepare 5 questions for interviewers.
+- **Day 5: Ways of Working + Leadership + Behavioral (§25, §31, §32, §33, §38)** — Git: branching strategies (TBD vs GitFlow vs GitHub Flow), conventional commits + semantic-release, PR best practices (§25); Engineering Excellence (code review, test pyramid, DORA metrics, blameless postmortems/incident lifecycle §31); Agile (Scrum vs Kanban, refinement vs planning, story points = relative effort §32); Documentation (ADRs — context + rejected alternatives, RFC vs ADR §33); Leadership & Soft Skills (leading without authority, SBI feedback model, stakeholder communication, meeting facilitation §38); Behavioral Interviews & STAR (§38.6): 8 must-have story themes, senior leveling signals, questions to ask. Write 5 STAR stories; prepare 5 questions for interviewers.
 - **Day 6–7: Mock Interviews** — timed coding (2 Mediums) + system design aloud (state NFR trade-offs, §36); behavioral + ways-of-working questions ("how do you review a PR / handle an incident / estimate?") + weak-area review.
 
 **Deliverables:** ✅ 25+ Mediums ✅ 4 system designs ✅ 5 STAR stories ✅ can answer eng-practice/agile/architecture-trade-off questions ✅ ready to interview.
@@ -314,6 +334,8 @@ If you have only 4 weeks, cut these lower-priority areas:
 | Engineering Excellence | 31 | **High** |
 | Agile & Docs | 32–33 | **Medium** |
 | Distributed Systems + System Design + Solution Architecture | 34–36 | **High** |
+| Generative AI & Prompt Engineering | 37 | **High** |
+| Engineering Leadership & Soft Skills | 38 | **High** |
 
 ---
 
@@ -333,9 +355,10 @@ If you have only 4 weeks, cut these lower-priority areas:
 | **Agile & Delivery** | Complete | Scrum/Kanban, ceremonies, estimation & story points |
 | **Documentation** | Complete | ADRs, RFCs/design docs, runbooks, C4/diagrams |
 | **Solution Architecture** | Complete | Distributed Systems, System Design, Quality attributes/NFRs, trade-offs, RACI |
-| **Soft Skills**   | Complete | STAR method, questions to ask           |
+| **Generative AI** | Complete | LLM fundamentals, prompting (CoT/RAG/tool use), production concerns |
+| **Leadership & Soft Skills** | Complete | Technical leadership, mentoring, SBI feedback, stakeholder comms, STAR |
 
 ---
 
-_Total Guide Size: ~72,000 words across 36 sections (8 parts)_
+_Total Guide Size: ~88,000 words across 38 sections (10 parts)_
 _Last Updated: June 2026_

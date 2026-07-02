@@ -633,4 +633,4 @@ Durable heuristics that guide decisions when no rule fits:
 
 ---
 
-_End of Part 8 — and of the guide. Return to the [README](./README.md) for the full table of contents and study plan._
+_End of Part 8. Continue to **Part 9** (Generative AI) in [`09_GenAI_37.md`](./09_GenAI_37.md), or return to the [README](./README.md)._

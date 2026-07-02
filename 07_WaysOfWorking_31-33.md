@@ -605,83 +605,6 @@ After resolution, write a **blameless postmortem**: timeline, impact, root cause
 
 **Interview framing:** "Walk me through a production incident you handled." — Use the lifecycle (detect → mitigate → resolve → learn), emphasize *mitigation first*, and land on the blameless postmortem with a concrete systemic fix you drove. That arc signals seniority more than the technical detail of the bug.
 
-## 31.5 Behavioral Interviews & STAR
-
-Behavioral interviewing is how senior engineers are assessed on non-technical dimensions: how they handle conflict, deliver under ambiguity, mentor others, make architectural trade-offs under constraints, and influence without authority. For a senior role, 30–40% of interview time is typically behavioral. The STAR format gives you a reliable structure for answering "tell me about a time when..." questions concisely and in a way that signals seniority rather than just competence. This section covers the framework, the themes you must have stories for, and the leveling signals that separate a senior answer from a mid-level one.
-
-### The STAR framework
-
-STAR gives behavioral answers a spine so they don't wander into vague storytelling: a bounded Situation, a specific Task you owned, an Action focused on *your* decisions (not "we"), and a concrete Result with measurable impact. Without the structure, answers signal mid-level; with it, they signal senior.
-
-**S**ituation → **T**ask → **A**ction → **R**esult
-
-| Element | What to cover | Target length |
-| --- | --- | --- |
-| **Situation** | Context: team, product, constraint or trigger | 2–3 sentences |
-| **Task** | Your specific responsibility in that situation | 1–2 sentences |
-| **Action** | What *you* specifically did — concrete, first-person | 3–5 sentences (the majority) |
-| **Result** | Measurable outcome + what you learned or changed | 2–3 sentences |
-
-The most common mistake is spending 60% of the answer on Situation and Task, leaving only a vague "we shipped it" for Action and Result. Interviewers want your decision-making — the background is just scaffolding.
-
-### Must-have stories for a senior role
-
-Prepare at least one story per theme. The questions below are essentially universal — they appear at every company regardless of size or stack:
-
-| Theme | Typical question |
-| --- | --- |
-| **Technical leadership** | "Tell me about a significant technical decision you made, especially one others disagreed with." |
-| **Conflict resolution** | "Tell me about a time you disagreed with a colleague, PM, or manager." |
-| **Ambiguity** | "Describe a time you had to move forward without all the information you needed." |
-| **Mentoring** | "How have you helped more junior engineers grow?" |
-| **Failure & learning** | "Tell me about a project that didn't go as planned. What did you do?" |
-| **Scope & trade-offs** | "Tell me about a time you had to cut scope to ship on time." |
-| **Cross-team influence** | "Tell me about a time you drove change across teams without direct authority." |
-| **Production incident** | "Walk me through a production incident you led." |
-
-### Example: Technical leadership — anti-pattern vs good
-
-**Anti-pattern:** *"We had a monolith. I researched microservices. We migrated. Things got faster."*
-No conflict, no decision process, no adversity, no measurable result — this is a resume bullet, not a story.
-
-**Good STAR:**
-- **S:** "Our checkout service was owned by three teams who all deployed together — any bug in payments blocked marketing promotions from shipping, which happened twice in one quarter."
-- **T:** "I was the tech lead for the payments team and was asked to recommend an architecture path that reduced deployment coupling."
-- **A:** "I ran a two-day spike to prototype the strangler-fig pattern — extracting one bounded context while keeping the rest of the monolith intact. I wrote an ADR documenting the trade-offs: deploy independence versus distributed tracing overhead and network latency. I presented both teams with the ADR and the spike results, proposed starting with just the payments context as a bounded pilot, and offered to own the migration myself so neither team took on unplanned work."
-- **R:** "We shipped the extracted service in six weeks. Checkout deploys went from requiring three-team sign-off to autonomous. Three months later the other teams requested the same migration for their contexts. The ADR format we used became the team's template for future architecture decisions."
-
-The action is specific, first-person, involves concrete artefacts (ADR, spike, strangler-fig), and the result is measurable and has a downstream effect.
-
-### Leveling signals — what separates senior answers
-
-The difference between a mid-level and a senior answer is usually *scope* and *specificity*: seniors name the trade-offs they rejected, drive process-level changes (not just code fixes), and quantify outcomes. Use this table as a self-check when preparing stories.
-
-| Signal | Mid-level answer | Senior answer |
-| --- | --- | --- |
-| **Scope** | Fixed my own code | Changed how the team works |
-| **Conflict** | Avoided or deferred | Named it, engaged directly, found shared ground |
-| **Failure** | "I learned to communicate better" | Specific process change you drove afterwards |
-| **Trade-offs** | Chose option A | Named options B and C and why they were rejected |
-| **Influence** | Got approval from manager | Built consensus across teams, earned buy-in |
-| **Result** | "It went well" | Metrics: time saved, error rate, deploy frequency |
-
-### What to avoid
-
-- **"We" throughout the Action** — share credit in Result, but the interviewer needs to know *your* specific contribution.
-- **No adversity** — stories where everything went smoothly don't demonstrate resilience or judgement under pressure.
-- **Vague results** — "the team was happier" is not a result; "incident frequency dropped by half in the following quarter" is.
-- **Over-long setup** — if you're 3 minutes in and still explaining the background, you've lost the room.
-
-### Questions to ask interviewers
-
-These signal senior-level thinking and give you real signal about the role and culture:
-
-1. *"What does a successful first six months look like — and how is that measured?"* (reveals whether the role is well-defined)
-2. *"How does the eng org handle postmortems? Can you walk me through a recent one?"* (reveals blameless vs blame culture)
-3. *"What's the biggest technical challenge the team is facing right now?"* (lets you demonstrate domain depth)
-4. *"How are architectural decisions made — is there an RFC or ADR process?"* (reveals decision-making maturity)
-5. *"What does the on-call rotation look like, and what's typical alert volume?"* (reveals operational health)
-
 ## 31.6 Feature Flags
 
 Feature flags (also: feature toggles, feature switches) are a **deployment decoupling mechanism**: code ships to production dark; the flag controls whether users see it. This separates the *deploy* event from the *release* event — a distinction central to trunk-based development, progressive delivery, and low MTTR. Flags let you merge continuously without long-lived branches, ramp up a risky change to 1% of users before 100%, and roll back instantly without a deploy. This section covers flag types, the three main platforms, targeting rules, and the flag debt lifecycle problem that bites every team.
@@ -839,11 +762,6 @@ The last step is the one teams skip. **Flag debt** accumulates when:
 | Incident lifecycle (mitigate first) | **Deep** |
 | Blameless postmortems / 5 Whys | **Important** |
 | Error budgets | **Important** (see §26.2) |
-| **Behavioral Interviews** | |
-| STAR framework | **Critical** |
-| Must-have story themes (8 themes) | **Critical** |
-| Senior leveling signals | **Deep** |
-| Questions to ask interviewers | **Important** |
 
 ---
 
@@ -1077,4 +995,4 @@ Diagrams communicate architecture faster than prose, and keeping them *as code* 
 
 ---
 
-_End of Part 7. Continue to **Part 8** (Solution Architecture) in [`08_SolutionArchitecture_34-36.md`](./08_SolutionArchitecture_34-36.md), or return to the [README](./README.md)._
+_End of Part 7. Continue to **Part 8** (Solution Architecture) in [`08_SolutionArchitecture_34-36.md`](./08_SolutionArchitecture_34-36.md), **Part 9** (Gen AI) in [`09_GenAI_37.md`](./09_GenAI_37.md), or return to the [README](./README.md)._
